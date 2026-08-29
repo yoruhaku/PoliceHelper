@@ -18,9 +18,9 @@ local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.in
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
 local WINDOW_TITLE = 'PoliceHelper – помощник МВД'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
--- Формат JSON: {"latest":"30082026_020412","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
+-- Формат JSON: {"latest":"30082026_023643","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '30082026_020412'
+LOCAL_VERSION = '30082026_023643'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -758,7 +758,12 @@ strobesActive = false
 strobeMode = 0
 cruiseActive = false
 cruiseTargetSpeed = 0.0
-updateState = { checking = false, downloading = false, token = 0 }
+updateState = {
+    checking = false, downloading = false, token = 0,
+    event = nil, deadline = 0.0, verbose = false, tempPath = '',
+    manualCheckRequested = false, downloadRequest = nil,
+    downloadDataComplete = false
+}
 updateConfirm = new.bool(false)
 pendingUpdateVersion = ''
 pendingUpdateUrl = ''
@@ -1092,11 +1097,46 @@ function updateUrl(url)
     return url .. separator .. 'policehelper=' .. os.time() .. math.random(1000, 9999)
 end
 
+function removeUpdateTemp(path)
+    if type(path) == 'string' and path ~= '' and doesFileExist(path) then
+        local ok, err = os.remove(path)
+        if not ok then print('[PoliceHelper] Не удалось удалить временный файл обновления: ' .. tostring(err)) end
+    end
+end
+
+function getUpdateFileSize(path)
+    local file = io.open(path, 'rb')
+    if not file then return 0 end
+    local size = file:seek('end') or 0
+    file:close()
+    return size
+end
+
+function updaterMessage(text, color)
+    if updateState.verbose and isSampAvailable() and sampIsLocalPlayerSpawned() then
+        notify(text, color)
+    else
+        print('[PoliceHelper] ' .. tostring(text))
+    end
+end
+
+function queueUpdaterEvent(kind, token, path, version)
+    if token ~= updateState.token then return end
+    updateState.event = { kind = kind, token = token, path = path, version = version }
+end
+
 function installDownloadedUpdate(path, latestVersion)
+    if not doesFileExist(path) or getUpdateFileSize(path) < 1024 then
+        updateState.downloading = false
+        removeUpdateTemp(path)
+        updaterMessage('Обновление отклонено: загруженный файл отсутствует или слишком мал.', 0xFF7777)
+        return
+    end
     local chunk, syntaxError = loadfile(path)
     if not chunk then
         updateState.downloading = false
-        notify('Обновление отклонено: загруженный Lua содержит ошибку.')
+        removeUpdateTemp(path)
+        updaterMessage('Обновление отклонено: загруженный Lua содержит ошибку.', 0xFF7777)
         print('[PoliceHelper] Ошибка обновления: ' .. tostring(syntaxError))
         return
     end
@@ -1106,7 +1146,8 @@ function installDownloadedUpdate(path, latestVersion)
     local backedUp, backupError = os.rename(scriptPath, backupPath)
     if not backedUp then
         updateState.downloading = false
-        notify('Не удалось создать резервную копию обновления.')
+        removeUpdateTemp(path)
+        updaterMessage('Не удалось создать резервную копию обновления.', 0xFF7777)
         print('[PoliceHelper] ' .. tostring(backupError))
         return
     end
@@ -1115,13 +1156,16 @@ function installDownloadedUpdate(path, latestVersion)
     if not installed then
         os.rename(backupPath, scriptPath)
         updateState.downloading = false
-        notify('Не удалось установить обновление; исходный файл восстановлен.')
+        removeUpdateTemp(path)
+        updaterMessage('Не удалось установить обновление; исходный файл восстановлен.', 0xFF7777)
         print('[PoliceHelper] ' .. tostring(installError))
         return
     end
 
     updateState.downloading = false
-    notify('Версия ' .. latestVersion .. ' установлена. Перезагрузка скрипта...')
+    updateState.deadline = 0.0
+    updateState.tempPath = ''
+    updaterMessage('Версия ' .. latestVersion .. ' установлена. Перезагрузка скрипта...', 0x77FF77)
     lua_thread.create(function()
         wait(700)
         thisScript():reload()
@@ -1131,85 +1175,157 @@ end
 function downloadUpdateScript(url, latestVersion, token)
     if not validRawGithubUrl(url) then
         updateState.downloading = false
-        notify('В манифесте указана неверная RAW-ссылка на Lua.')
+        updaterMessage('В манифесте указана неверная RAW-ссылка на Lua.', 0xFF7777)
         return
     end
 
     local updatePath = thisScript().path .. '.update.tmp'
+    removeUpdateTemp(updatePath)
     updateState.downloading = true
-    notify('Загрузка версии ' .. latestVersion .. '...')
-    local ok, err = pcall(downloadUrlToFile, updateUrl(url), updatePath, function(_, status)
-        if token ~= updateState.token or status ~= downloadStatus.STATUSEX_ENDDOWNLOAD then return end
-        installDownloadedUpdate(updatePath, latestVersion)
+    updateState.checking = false
+    updateState.event = nil
+    updateState.downloadDataComplete = false
+    updateState.tempPath = updatePath
+    updateState.deadline = os.clock() + UPDATE_TIMEOUT_MS / 1000
+    updaterMessage('Загрузка версии ' .. latestVersion .. '...')
+    local ok, downloadId = pcall(downloadUrlToFile, updateUrl(url), updatePath, function(_, status)
+        if token ~= updateState.token then return end
+        if status == downloadStatus.STATUS_ENDDOWNLOADDATA then
+            updateState.downloadDataComplete = true
+        elseif status == downloadStatus.STATUSEX_ENDDOWNLOAD then
+            queueUpdaterEvent('script', token, updatePath, latestVersion)
+        end
     end)
-    if not ok then
+    if not ok or not downloadId then
         updateState.downloading = false
-        notify('Не удалось запустить загрузку обновления.')
-        print('[PoliceHelper] ' .. tostring(err))
+        updateState.deadline = 0.0
+        updateState.tempPath = ''
+        removeUpdateTemp(updatePath)
+        updaterMessage('Не удалось запустить загрузку обновления.', 0xFF7777)
+        print('[PoliceHelper] ' .. tostring(downloadId))
     end
 end
 
-function checkForPoliceHelperUpdate()
+function checkForPoliceHelperUpdate(verbose)
+    updateState.verbose = verbose == true
     if UPDATE_MANIFEST_URL == '' then
-        notify('Проверка обновлений пока недоступна.')
+        updaterMessage('Проверка обновлений пока недоступна.', 0xFFFF77)
         return
     end
     if not validRawGithubUrl(UPDATE_MANIFEST_URL) then
-        notify('Проверка обновлений временно недоступна.')
+        updaterMessage('Проверка обновлений временно недоступна.', 0xFF7777)
         return
     end
     if updateState.checking or updateState.downloading then
-        notify('Проверка или загрузка уже выполняется.')
+        updaterMessage('Проверка или загрузка уже выполняется.')
         return
     end
 
     updateState.token = updateState.token + 1
     local token = updateState.token
     local manifestPath = thisScript().path .. '.version.tmp'
+    removeUpdateTemp(manifestPath)
     updateState.checking = true
-    notify('Проверка обновления...')
-    local ok, err = pcall(downloadUrlToFile, updateUrl(UPDATE_MANIFEST_URL), manifestPath, function(_, status)
+    updateState.event = nil
+    updateState.tempPath = manifestPath
+    updateState.deadline = os.clock() + UPDATE_TIMEOUT_MS / 1000
+    updaterMessage('Проверка обновления...')
+    local ok, downloadId = pcall(downloadUrlToFile, updateUrl(UPDATE_MANIFEST_URL), manifestPath, function(_, status)
         if token ~= updateState.token or status ~= downloadStatus.STATUSEX_ENDDOWNLOAD then return end
+        queueUpdaterEvent('manifest', token, manifestPath)
+    end)
+    if not ok or not downloadId then
         updateState.checking = false
-        local file = io.open(manifestPath, 'rb')
-        if not file then notify('Не удалось прочитать манифест обновления.'); return end
+        updateState.deadline = 0.0
+        updateState.tempPath = ''
+        removeUpdateTemp(manifestPath)
+        updaterMessage('Не удалось запустить проверку обновления.', 0xFF7777)
+        print('[PoliceHelper] ' .. tostring(downloadId))
+        return
+    end
+end
+
+function processUpdaterMainThread()
+    if updateState.manualCheckRequested then
+        updateState.manualCheckRequested = false
+        checkForPoliceHelperUpdate(true)
+    end
+
+    if updateState.downloadRequest then
+        local request = updateState.downloadRequest
+        updateState.downloadRequest = nil
+        updateState.verbose = true
+        downloadUpdateScript(request.url, request.version, request.token)
+    end
+
+    if updateState.deadline > 0 and os.clock() >= updateState.deadline
+        and (updateState.checking or updateState.downloading)
+    then
+        updateState.token = updateState.token + 1
+        updateState.checking = false
+        updateState.downloading = false
+        updateState.downloadDataComplete = false
+        updateState.event = nil
+        updateState.deadline = 0.0
+        removeUpdateTemp(updateState.tempPath)
+        updateState.tempPath = ''
+        updaterMessage('Время ожидания обновления истекло.', 0xFF7777)
+        return
+    end
+
+    local event = updateState.event
+    if not event then return end
+    updateState.event = nil
+    if event.token ~= updateState.token then
+        removeUpdateTemp(event.path)
+        return
+    end
+
+    if event.kind == 'script' then
+        updateState.deadline = 0.0
+        if not updateState.downloadDataComplete then
+            updateState.downloading = false
+            updateState.tempPath = ''
+            removeUpdateTemp(event.path)
+            updaterMessage('Обновление не установлено: загрузка файла не была завершена.', 0xFF7777)
+            return
+        end
+        updateState.downloadDataComplete = false
+        installDownloadedUpdate(event.path, event.version)
+        return
+    end
+
+    if event.kind == 'manifest' then
+        updateState.checking = false
+        updateState.deadline = 0.0
+        updateState.tempPath = ''
+        local file = io.open(event.path, 'rb')
+        if not file then
+            updaterMessage('Не удалось прочитать манифест обновления.', 0xFF7777)
+            return
+        end
         local jsonText = file:read('*a') or ''
         file:close()
+        removeUpdateTemp(event.path)
         jsonText = jsonText:gsub('^\239\187\191', '')
         local decoded, manifest = pcall(decodeJson, jsonText)
         if not decoded or type(manifest) ~= 'table' then
-            notify('GitHub вернул некорректный манифест обновления.')
+            updaterMessage('GitHub вернул некорректный манифест обновления.', 0xFF7777)
             return
         end
         local latest = tostring(manifest.latest or '')
         if latest == '' or type(manifest.updateurl) ~= 'string' then
-            notify('В манифесте нужны поля latest и updateurl.')
+            updaterMessage('В манифесте нужны поля latest и updateurl.', 0xFF7777)
             return
         end
         if latest == LOCAL_VERSION then
-            notify('Установлена актуальная версия ' .. LOCAL_VERSION .. '.')
+            updaterMessage('Установлена актуальная версия ' .. LOCAL_VERSION .. '.', 0x77FF77)
             return
         end
         pendingUpdateVersion = latest
         pendingUpdateUrl = manifest.updateurl
         updateConfirm[0] = true
-    end)
-    if not ok then
-        updateState.checking = false
-        notify('Не удалось запустить проверку обновления.')
-        print('[PoliceHelper] ' .. tostring(err))
-        return
     end
-
-    lua_thread.create(function()
-        wait(UPDATE_TIMEOUT_MS)
-        if token == updateState.token and (updateState.checking or updateState.downloading) then
-            updateState.token = updateState.token + 1
-            updateState.checking = false
-            updateState.downloading = false
-            notify('Время ожидания обновления истекло.')
-        end
-    end)
 end
 
 function handleServerMessageEvent(color, text)
@@ -4651,8 +4767,8 @@ local function commandM66()
 end
 
 local function commandMegaphoneRoadCode()
-    runSequence('Требование соблюдать дорожный кодекс', {
-        '/m Гражданин, пожалуйста, не нарушайте дорожный кодекс штата. Требование!'
+    runSequence('Требование соблюдать правила дорожного движения', {
+        '/m Соблюдайте правила дорожного движения! Требование!'
     })
 end
 
@@ -4731,6 +4847,8 @@ local helperCommandSections = {
     {
         title = 'Задержание и документы',
         rows = {
+            {'/cf ID', 'Короткая версия /cuff с полной RP-отыгровкой', '/cf 15'},
+            {'/hd ID', 'Короткая версия /hold с полной RP-отыгровкой', '/hd 15'},
             {'/udo', 'Представиться и показать удостоверение', '/udo'},
             {'/prava', 'Зачитать задержанному его права', '/prava'},
             {'/eject ID', 'Высадить человека из транспорта с RP', '/eject 15'},
@@ -7024,7 +7142,7 @@ function drawSettings()
 
         section('Обновление')
         imgui.Text(u8('Текущая версия: ' .. LOCAL_VERSION))
-        if wideButton('Проверить обновление', 240) then checkForPoliceHelperUpdate() end
+        if wideButton('Проверить обновление', 240) then updateState.manualCheckRequested = true end
     else
         local commandTabs = { 'Горячие действия', 'Редактор команд' }
         commandsSettingsPage = drawCenteredTabs(commandTabs, commandsSettingsPage, 'commandSettingsTab', 220)
@@ -7113,7 +7231,9 @@ imgui.OnFrame(
     function() return window[0] end,
     function(context)
         context.HideCursor = false
-        context.LockPlayer = true
+        -- Главное окно не должно сбрасывать газ, тормоз или движение персонажа.
+        -- Видимый курсор mimgui продолжает обрабатывать элементы интерфейса сам.
+        context.LockPlayer = false
         safeInterfaceFrame('главного окна', function()
         imgui.SetNextWindowSize(imgui.ImVec2(1080, 680), imgui.Cond.FirstUseEver)
         local display = imgui.GetIO().DisplaySize
@@ -7316,7 +7436,9 @@ function drawUpdateConfirm(context)
         imgui.Spacing()
         if imgui.Button(u8'Обновить', imgui.ImVec2(195, 32)) then
             updateConfirm[0] = false
-            downloadUpdateScript(pendingUpdateUrl, pendingUpdateVersion, updateState.token)
+            updateState.downloadRequest = {
+                url = pendingUpdateUrl, version = pendingUpdateVersion, token = updateState.token
+            }
         end
         imgui.SameLine()
         if imgui.Button(u8'Не сейчас', imgui.ImVec2(195, 32)) then
@@ -7407,8 +7529,10 @@ function main()
     registerSafeCommand('udo', commandUdo)
     registerSafeCommand('prava', commandRights)
     registerSafeCommand('cuff', commandCuff)
+    registerSafeCommand('cf', commandCuff)
     registerSafeCommand('uncuff', commandUncuff)
     registerSafeCommand('hold', commandHold)
+    registerSafeCommand('hd', commandHold)
     registerSafeCommand('search', commandSearch)
     registerSafeCommand('putpl', commandPutpl)
     registerSafeCommand('pull', commandPull)
@@ -7488,7 +7612,8 @@ function main()
     editorBuiltInHandlers = {
         ph = function() toggleWindow() end, phsync = function() requestStatsNow() end,
         nanim = commandAnimations, udo = commandUdo, prava = commandRights,
-        cuff = commandCuff, uncuff = commandUncuff, hold = commandHold,
+        cuff = commandCuff, cf = commandCuff, uncuff = commandUncuff,
+        hold = commandHold, hd = commandHold,
         search = commandSearch, putpl = commandPutpl, pull = commandPull,
         arrest = commandArrest, clear = commandClear, su = commandSu,
         pg = commandQuickDisobedience, vn = commandQuickArmedAttack,
@@ -7522,8 +7647,9 @@ function main()
     notify('Загружен. Главное меню: /ph или ' .. mainHotkeyName() .. '. Быстрый доступ: удерживать ' .. quickHotkeyName() .. '.')
     if UPDATE_MANIFEST_URL ~= '' then
         lua_thread.create(function()
-            wait(5000)
-            checkForPoliceHelperUpdate()
+            while not isSampAvailable() or not sampIsLocalPlayerSpawned() do wait(500) end
+            wait(10000)
+            checkForPoliceHelperUpdate(false)
         end)
     end
 
@@ -7532,6 +7658,11 @@ function main()
     local nextWeaponCheck = 0
     while true do
         wait(0)
+        if updateState.manualCheckRequested or updateState.downloadRequest
+            or updateState.event or updateState.deadline > 0
+        then
+            safeRuntimeCall('обработки обновления', processUpdaterMainThread)
+        end
         if whiteNametagIds[0] then
             local renderOk, renderError = pcall(drawWhiteNametagIds)
             if not renderOk then
