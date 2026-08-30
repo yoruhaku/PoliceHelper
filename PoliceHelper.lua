@@ -17,9 +17,9 @@ local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.in
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
 local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
--- Формат JSON: {"latest":"30082026_043835","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
+-- Формат JSON: {"latest":"30082026_045101","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '30082026_043835'
+LOCAL_VERSION = '30082026_045101'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -718,6 +718,12 @@ pendingWantedTargetNickname = ''
 pendingWantedExpiresAt = 0.0
 pendingWantedReason = ''
 pendingWantedRetryUsed = false
+cuffRpPendingId = -1
+cuffRpPendingNickname = ''
+cuffRpPendingUntil = 0.0
+holdRpPendingId = -1
+holdRpPendingNickname = ''
+holdRpPendingUntil = 0.0
 trackedMapId = -1
 trackedNameTextdrawId = -1
 trackedPointTextdrawId = -1
@@ -1390,6 +1396,47 @@ function handleServerMessageEvent(color, text)
             else
                 sampSendChat('/me нажал кнопку на служебной панели управления и закрыл дверь')
             end
+        end
+    end
+
+    if cuffRpPendingId >= 0 then
+        if os.clock() > cuffRpPendingUntil then
+            cuffRpPendingId = -1
+            cuffRpPendingNickname = ''
+            cuffRpPendingUntil = 0.0
+        else
+            local selfOk, selfId = sampGetPlayerIdByCharHandle(PLAYER_PED)
+            local selfNickname = selfOk and sampGetPlayerNickname(selfId) or ''
+            local cuffConfirmed = selfNickname ~= '' and cuffRpPendingNickname ~= ''
+                and clean:match('%s' .. selfNickname .. '%s+надела? на%s+'
+                    .. cuffRpPendingNickname .. '%s+наручники$') ~= nil
+            if cuffConfirmed then
+                cuffRpPendingId = -1
+                cuffRpPendingNickname = ''
+                cuffRpPendingUntil = 0.0
+                lua_thread.create(function()
+                    wait(0)
+                    sampSendChat('/me зафиксировал наручники на запястьях задержанного')
+                end)
+            end
+        end
+    end
+
+    if holdRpPendingId >= 0 then
+        if os.clock() > holdRpPendingUntil then
+            holdRpPendingId = -1
+            holdRpPendingNickname = ''
+            holdRpPendingUntil = 0.0
+        elseif holdRpPendingNickname ~= ''
+            and clean:find('Вы ведёте за собой ' .. holdRpPendingNickname .. '.', 1, true) == 1
+        then
+            holdRpPendingId = -1
+            holdRpPendingNickname = ''
+            holdRpPendingUntil = 0.0
+            lua_thread.create(function()
+                wait(0)
+                sampSendChat('/me аккуратно взял задержанного под руку и повёл за собой')
+            end)
         end
     end
 
@@ -4411,9 +4458,12 @@ local function commandCuff(args)
     end
     local id = parseIdOnly(args, '/cuff [ID]')
     if not id then return end
+    local _, nickname = getPlayerById(id)
+    cuffRpPendingId = id
+    cuffRpPendingNickname = nickname or ''
+    cuffRpPendingUntil = os.clock() + 8.0
     runSequence('Наручники', {
         '/me удерживая руки подозреваемого за спиной, снял наручники с поясного держателя.',
-        '/me зафиксировал наручники на запястьях задержанного',
         '/cuff {id}'
     }, { targetId = id })
 end
@@ -4429,10 +4479,17 @@ local function commandUncuff(args)
 end
 
 local function commandHold(args)
+    if sequenceBusy then
+        notify('Сначала дождитесь завершения действия: ' .. sequenceName .. '.')
+        return
+    end
     local id = parseIdOnly(args, '/hold [ID]')
     if not id then return end
+    local _, nickname = getPlayerById(id)
+    holdRpPendingId = id
+    holdRpPendingNickname = nickname or ''
+    holdRpPendingUntil = os.clock() + 8.0
     runSequence('Сопровождение', {
-        '/me аккуратно взял задержанного под руку и повёл за собой',
         '/hold {id}'
     }, { targetId = id })
 end
@@ -6127,11 +6184,8 @@ function drawDetention()
 
     section('Фиксация')
     if wideButton('Надеть наручники', 210) then
-        runSequence('Наручники', {
-            '/me удерживая руки подозреваемого за спиной, снял наручники с поясного держателя.',
-            '/me зафиксировал наручники на запястьях задержанного',
-            '/cuff {id}'
-        }, { target = true })
+        local id, _, err = getTarget()
+        if id then commandCuff(tostring(id)) else notify(err or 'Сначала выберите игрока.') end
     end
     if wideButton('Снять наручники', 210) then
         runSequence('Снятие наручников', {
@@ -6141,10 +6195,8 @@ function drawDetention()
         }, { target = true })
     end
     if wideButton('Сопровождать', 210) then
-        runSequence('Сопровождение', {
-            '/me аккуратно взял задержанного под руку и повёл за собой',
-            '/hold {id}'
-        }, { target = true })
+        local id, _, err = getTarget()
+        if id then commandHold(tostring(id)) else notify(err or 'Сначала выберите игрока.') end
     end
 
     section('Обыск')
