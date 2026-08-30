@@ -17,9 +17,9 @@ local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.in
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
 local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
--- Формат JSON: {"latest":"30082026_045101","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
+-- Формат JSON: {"latest":"30082026_050558","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '30082026_045101'
+LOCAL_VERSION = '30082026_050558'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -720,6 +720,7 @@ pendingWantedReason = ''
 pendingWantedRetryUsed = false
 cuffRpPendingId = -1
 cuffRpPendingNickname = ''
+cuffRpPendingActor = ''
 cuffRpPendingUntil = 0.0
 holdRpPendingId = -1
 holdRpPendingNickname = ''
@@ -1399,25 +1400,26 @@ function handleServerMessageEvent(color, text)
         end
     end
 
+    local confirmationText = clean:gsub('\194\160', ' '):gsub('\160', ' '):gsub('[\t ]+', ' ')
+
     if cuffRpPendingId >= 0 then
         if os.clock() > cuffRpPendingUntil then
             cuffRpPendingId = -1
             cuffRpPendingNickname = ''
+            cuffRpPendingActor = ''
             cuffRpPendingUntil = 0.0
         else
-            local selfOk, selfId = sampGetPlayerIdByCharHandle(PLAYER_PED)
-            local selfNickname = selfOk and sampGetPlayerNickname(selfId) or ''
-            local cuffConfirmed = selfNickname ~= '' and cuffRpPendingNickname ~= ''
-                and clean:match('%s' .. selfNickname .. '%s+надела? на%s+'
-                    .. cuffRpPendingNickname .. '%s+наручники$') ~= nil
+            local ownActionText = confirmationText:gsub('_', ' ')
+            local cuffConfirmed = cuffRpPendingActor ~= ''
+                and (ownActionText:find(' ' .. cuffRpPendingActor .. ' надел на ', 1, true)
+                    or ownActionText:find(' ' .. cuffRpPendingActor .. ' надела на ', 1, true))
+                and ownActionText:find(' наручники', 1, true)
             if cuffConfirmed then
                 cuffRpPendingId = -1
                 cuffRpPendingNickname = ''
+                cuffRpPendingActor = ''
                 cuffRpPendingUntil = 0.0
-                lua_thread.create(function()
-                    wait(0)
-                    sampSendChat('/me зафиксировал наручники на запястьях задержанного')
-                end)
+                sampSendChat('/me зафиксировал наручники на запястьях задержанного')
             end
         end
     end
@@ -1427,16 +1429,13 @@ function handleServerMessageEvent(color, text)
             holdRpPendingId = -1
             holdRpPendingNickname = ''
             holdRpPendingUntil = 0.0
-        elseif holdRpPendingNickname ~= ''
-            and clean:find('Вы ведёте за собой ' .. holdRpPendingNickname .. '.', 1, true) == 1
-        then
-            holdRpPendingId = -1
-            holdRpPendingNickname = ''
-            holdRpPendingUntil = 0.0
-            lua_thread.create(function()
-                wait(0)
+        else
+            if confirmationText:find('Вы ведёте за собой ', 1, true) == 1 then
+                holdRpPendingId = -1
+                holdRpPendingNickname = ''
+                holdRpPendingUntil = 0.0
                 sampSendChat('/me аккуратно взял задержанного под руку и повёл за собой')
-            end)
+            end
         end
     end
 
@@ -4461,7 +4460,8 @@ local function commandCuff(args)
     local _, nickname = getPlayerById(id)
     cuffRpPendingId = id
     cuffRpPendingNickname = nickname or ''
-    cuffRpPendingUntil = os.clock() + 8.0
+    cuffRpPendingActor = getLocalName()
+    cuffRpPendingUntil = os.clock() + 15.0
     runSequence('Наручники', {
         '/me удерживая руки подозреваемого за спиной, снял наручники с поясного держателя.',
         '/cuff {id}'
@@ -4488,7 +4488,7 @@ local function commandHold(args)
     local _, nickname = getPlayerById(id)
     holdRpPendingId = id
     holdRpPendingNickname = nickname or ''
-    holdRpPendingUntil = os.clock() + 8.0
+    holdRpPendingUntil = os.clock() + 15.0
     runSequence('Сопровождение', {
         '/hold {id}'
     }, { targetId = id })
