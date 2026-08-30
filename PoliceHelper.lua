@@ -17,9 +17,9 @@ local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.in
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
 local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
--- Формат JSON: {"latest":"30082026_053118","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
+-- Формат JSON: {"latest":"30082026_054028","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '30082026_053118'
+LOCAL_VERSION = '30082026_054028'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -1141,6 +1141,29 @@ function removeUpdateTemp(path)
         local ok, err = os.remove(path)
         if not ok then print('[PoliceHelper] Не удалось удалить временный файл обновления: ' .. tostring(err)) end
     end
+end
+
+function cleanupUpdateBackups()
+    local scriptPath = thisScript().path
+    local directory = scriptPath:match('^(.*[\\/])') or ''
+    local scriptName = scriptPath:match('([^\\/]+)$') or 'PoliceHelper.lua'
+    local escapedName = scriptName:gsub('([^%w])', '%%%1')
+    local mask = scriptPath .. '.update.*.bak'
+    local opened, handle, name = pcall(findFirstFile, mask)
+    if not opened or not handle then return end
+
+    while name do
+        if name:match('^' .. escapedName .. '%.update%.%d+%.bak$') then
+            local removed, removeError = os.remove(directory .. name)
+            if not removed then
+                print('[PoliceHelper] Не удалось удалить старую резервную копию: ' .. tostring(removeError))
+            end
+        end
+        local nextOk, nextName = pcall(findNextFile, handle)
+        if not nextOk then break end
+        name = nextName
+    end
+    pcall(findClose, handle)
 end
 
 function getUpdateFileSize(path)
@@ -7841,6 +7864,7 @@ end
 function main()
     if not isSampfuncsLoaded() or not isSampLoaded() then return end
     while not isSampAvailable() do wait(100) end
+    cleanupUpdateBackups()
     local fontOk, createdFont = pcall(renderCreateFont, 'Arial', 11, 13)
     if fontOk then
         whiteIdFont = createdFont
