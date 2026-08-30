@@ -6,7 +6,6 @@ local ffi = require 'ffi'
 local encoding = require 'encoding'
 local vkeys = require 'vkeys'
 local sampev = require 'lib.samp.events'
-local bit = require 'bit'
 downloadStatus = require('moonloader').download_status
 
 encoding.default = 'CP1251'
@@ -16,11 +15,11 @@ local new = imgui.new
 local CONFIG_NAME = 'PoliceHelper'
 local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.ini'
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
-local WINDOW_TITLE = 'PoliceHelper – помощник МВД'
+local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
--- Формат JSON: {"latest":"30082026_023643","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
+-- Формат JSON: {"latest":"30082026_043835","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '30082026_023643'
+LOCAL_VERSION = '30082026_043835'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -517,7 +516,6 @@ local defaults = {
         weaponRoleplay = false,
         equipmentKnown = 'Щит|Дубинка|Пистолет с глушителем 9 мм|Бронежилет|Маска|Desert Eagle|MP5|M4|Дробовик|Дымовые шашки',
         equipmentSelected = 'Дубинка|Бронежилет|Маска|Desert Eagle|MP5|M4',
-        highlightNicknames = true,
         whiteMaskedChatIds = true,
         whiteNametagIds = false,
         hideVChannel = false,
@@ -589,6 +587,7 @@ end
 
 local window = new.bool(false)
 quickMenu = new.bool(false)
+interviewWindow = new.bool(false)
 quickMenuPage = 'main'
 local targetId = new.int(-1)
 local delayMs = new.int(math.max(0, math.min(2000, tonumber(config.main.delay) or 500)))
@@ -600,7 +599,6 @@ autoReportDamager = new.bool(config.main.autoReportDamager == true)
 autoReportTracked = new.bool(config.main.autoReportTracked == true)
 autoEquipment = new.bool(config.main.autoEquipment == true)
 weaponRoleplay = new.bool(config.main.weaponRoleplay == true)
-highlightNicknames = new.bool(config.main.highlightNicknames == true)
 whiteMaskedChatIds = new.bool(config.main.whiteMaskedChatIds == true)
 whiteNametagIds = new.bool(config.main.whiteNametagIds == true)
 hideVChannel = new.bool(config.main.hideVChannel == true)
@@ -665,6 +663,16 @@ local crewBuf = newBuffer(160, config.main.crew)
 local reasonBuf = newBuffer(192, '')
 local noteBuf = newBuffer(192, '')
 local searchBuf = newBuffer(128, '')
+interviewState = {
+    targetId = new.int(-1),
+    passport = new.bool(false),
+    licenses = new.bool(false),
+    rangeStatement = new.bool(false),
+    requirements = new.bool(false),
+    acceptArmed = new.bool(false),
+    refusalBuf = newBuffer(192, ''),
+    lastStep = 0
+}
 commandEditorNameBuf = newBuffer(32, '')
 commandEditorTargetBuf = newBuffer(32, '')
 commandEditorBodyBuf = newBuffer(2048, '')
@@ -925,7 +933,9 @@ end
 
 local function notify(text, color)
     if isSampAvailable() then
-        sampAddChatMessage(CHAT_PREFIX .. text, color or -1)
+        -- Второй аргумент окрашивает системный таймстамп до первого цветового кода.
+        -- Белый базовый цвет сохраняет время нейтральным, а префикс красится сам.
+        sampAddChatMessage(CHAT_PREFIX .. text, -1)
     end
 end
 
@@ -933,7 +943,7 @@ function protectedError(scope, err)
     local message = tostring(err or 'неизвестная ошибка')
     print('[PoliceHelper] Защищённая ошибка в ' .. tostring(scope) .. ': ' .. message)
     pcall(function()
-        if isSampAvailable() then sampAddChatMessage(CHAT_PREFIX .. 'Действие остановлено из-за внутренней ошибки. Подробности сохранены в moonloader.log.', 0xFF7777) end
+        if isSampAvailable() then sampAddChatMessage(CHAT_PREFIX .. 'Действие остановлено из-за внутренней ошибки. Подробности сохранены в moonloader.log.', -1) end
     end)
 end
 
@@ -953,7 +963,7 @@ end
 function safeFrame(scope, callback)
     local ok, err = xpcall(callback, debug.traceback)
     if not ok then
-        window[0], quickMenu[0], animationWindow[0] = false, false, false
+        window[0], quickMenu[0], animationWindow[0], interviewWindow[0] = false, false, false, false
         wantedSelector[0], ticketSelector[0], sosConfirm[0], updateConfirm[0] = false, false, false, false
         protectedError('интерфейсе ' .. scope, err)
     end
@@ -1049,7 +1059,6 @@ local function saveConfig()
     config.main.weaponRoleplay = weaponRoleplay[0]
     config.main.equipmentKnown = table.concat(equipmentKnown, '|')
     config.main.equipmentSelected = selectedEquipmentString()
-    config.main.highlightNicknames = highlightNicknames[0]
     config.main.whiteMaskedChatIds = whiteMaskedChatIds[0]
     config.main.whiteNametagIds = whiteNametagIds[0]
     config.main.hideVChannel = hideVChannel[0]
@@ -1076,7 +1085,7 @@ local function saveConfig()
     local file = io.open(CONFIG_PATH, 'wb')
     if not file then return false end
     file:write('[main]\r\n')
-    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportTracked', 'commandAliases', 'customCommands', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'highlightNicknames', 'whiteMaskedChatIds', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
+    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportTracked', 'commandAliases', 'customCommands', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'whiteMaskedChatIds', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
         local value = tostring(config.main[key]):gsub('[\r\n]', '')
         file:write(key .. '=' .. value .. '\r\n')
     end
@@ -1095,6 +1104,26 @@ end
 function updateUrl(url)
     local separator = url:find('?', 1, true) and '&' or '?'
     return url .. separator .. 'policehelper=' .. os.time() .. math.random(1000, 9999)
+end
+
+function formatReleaseTimestamp(version)
+    local day, month, year, hour, minute = tostring(version or '')
+        :match('^(%d%d)(%d%d)(%d%d%d%d)_(%d%d)(%d%d)%d%d$')
+    if not day then return tostring(version or '') end
+    return string.format('%s.%s.%s %s:%s', day, month, year, hour, minute)
+end
+
+function releaseVersionKey(version)
+    local day, month, year, hour, minute, second = tostring(version or '')
+        :match('^(%d%d)(%d%d)(%d%d%d%d)_(%d%d)(%d%d)(%d%d)$')
+    if not day then return nil end
+    return year .. month .. day .. hour .. minute .. second
+end
+
+function isReleaseVersionNewer(candidate, current)
+    local candidateKey = releaseVersionKey(candidate)
+    local currentKey = releaseVersionKey(current)
+    return candidateKey ~= nil and currentKey ~= nil and candidateKey > currentKey
 end
 
 function removeUpdateTemp(path)
@@ -1314,12 +1343,16 @@ function processUpdaterMainThread()
             return
         end
         local latest = tostring(manifest.latest or '')
-        if latest == '' or type(manifest.updateurl) ~= 'string' then
+        if not releaseVersionKey(latest) or type(manifest.updateurl) ~= 'string' then
             updaterMessage('В манифесте нужны поля latest и updateurl.', 0xFF7777)
             return
         end
         if latest == LOCAL_VERSION then
             updaterMessage('Установлена актуальная версия ' .. LOCAL_VERSION .. '.', 0x77FF77)
+            return
+        end
+        if not isReleaseVersionNewer(latest, LOCAL_VERSION) then
+            updaterMessage('Локальная версия новее опубликованной: ' .. LOCAL_VERSION .. '.', 0x77FF77)
             return
         end
         pendingUpdateVersion = latest
@@ -1573,23 +1606,6 @@ function handleServerMessageEvent(color, text)
         if count > 0 then return { color, recolored } end
     end
 
-    if highlightNicknames[0] then
-        local messageColor = tonumber(color) or -1
-        local restoreColor = string.format('%06X', bit.band(bit.rshift(messageColor, 8), 0xFFFFFF))
-        local changed = false
-        local recolored = text:gsub('([%w_]+)%[(%d+)%]', function(nickname, idText)
-            local id = tonumber(idText)
-            if id and sampIsPlayerConnected(id) then
-                local ok, actualNickname = pcall(sampGetPlayerNickname, id)
-                if ok and actualNickname == nickname then
-                    changed = true
-                    return '{FFFFFF}' .. nickname .. '[' .. idText .. ']{' .. restoreColor .. '}'
-                end
-            end
-            return nickname .. '[' .. idText .. ']'
-        end)
-        if changed then return { color, recolored } end
-    end
 end
 
 local function requestStatsNow()
@@ -4904,6 +4920,7 @@ local helperCommandSections = {
         title = 'Управление PoliceHelper',
         rows = {
             {'/ph', 'Открыть или закрыть главное окно', '/ph'},
+            {'/hr [ID]', 'Открыть пошаговый мастер собеседования; ID можно указать в окне', '/hr 15'},
             {'Настроенная клавиша окна', 'Открыть или закрыть главное окно', 'По умолчанию P + O'},
             {'Настроенная клавиша', 'Удерживать для меню быстрого доступа; отпускание закрывает его', 'По умолчанию X'},
             {'/phsync', 'Повторно получить профиль через серверную статистику', '/phsync'},
@@ -5257,6 +5274,121 @@ function commandInvite(args)
         '/do В руках находится комплект служебной формы и радиостанция.',
         '/me передал новому сотруднику комплект формы и служебную радиостанцию',
         serverCommand('invite', id)
+    })
+end
+
+function resetInterviewState(newTargetId)
+    interviewState.passport[0] = false
+    interviewState.licenses[0] = false
+    interviewState.rangeStatement[0] = false
+    interviewState.requirements[0] = false
+    interviewState.acceptArmed[0] = false
+    ffi.fill(interviewState.refusalBuf, ffi.sizeof(interviewState.refusalBuf), 0)
+    interviewState.lastStep = 0
+end
+
+function getInterviewTarget()
+    local id = tonumber(interviewState.targetId[0])
+    if not id or id < 0 or id > 999 then
+        return nil, nil, 'Укажите корректный ID кандидата.'
+    end
+    return getPlayerById(id)
+end
+
+function runInterviewStep(step, name, lines)
+    local id, _, err = getInterviewTarget()
+    if not id then notify(err); return end
+    interviewState.lastStep = step
+    runSequence(name, lines, { targetId = id })
+end
+
+function commandInterview(args)
+    local value = trim(args)
+    local id
+    if value ~= '' then
+        if not value:match('^%d+$') then
+            notify('Использование: /hr [ID]. ID можно указать позже в окне.')
+            return
+        end
+        id = tonumber(value)
+        local validId, _, err = getPlayerById(id)
+        if not validId then notify(err); return end
+        id = validId
+    elseif targetId[0] >= 0 then
+        id = tonumber(targetId[0])
+    else
+        id = tonumber(interviewState.targetId[0]) or -1
+    end
+
+    if interviewState.targetId[0] ~= id then
+        interviewState.targetId[0] = id
+        resetInterviewState(id)
+    end
+    interviewWindow[0] = true
+end
+
+function interviewGreeting()
+    runInterviewStep(1, 'Приветствие на собеседовании', {
+        'Здравствуйте. Вы прибыли на собеседование в Полицейскую Академию?',
+        'Меня зовут {myname}, {rank}. Я проведу собеседование.'
+    })
+end
+
+function interviewQuestions()
+    runInterviewStep(2, 'Вопросы кандидату', {
+        'Расскажите немного о себе: как вас зовут, где вы учились и работали?',
+        'Почему вы решили поступить в Полицейскую Академию?'
+    })
+end
+
+function interviewDocuments()
+    local ownId = -1
+    local ok, resolvedId = sampGetPlayerIdByCharHandle(PLAYER_PED)
+    if ok then ownId = resolvedId end
+    local hint = ownId >= 0
+        and ('/n Для передачи документов: /pass ' .. ownId .. ', /lic ' .. ownId .. ', /wbook ' .. ownId .. '.')
+        or '/n Покажите паспорт, лицензии и выписку из тира доступными серверными командами.'
+    runInterviewStep(3, 'Запрос документов', {
+        'Предъявите, пожалуйста, паспорт, лицензии и выписку из тира.',
+        hint
+    })
+end
+
+function interviewInspectDocuments()
+    runInterviewStep(4, 'Проверка документов', {
+        '/me внимательно изучил предоставленные документы',
+        '/do Документы проверены на подлинность и соответствие установленным требованиям.'
+    })
+end
+
+function interviewAccept()
+    local id, _, err = getInterviewTarget()
+    if not id then notify(err); return end
+    interviewState.lastStep = 5
+    runSequence('Зачисление кандидата', {
+        'Вы успешно прошли собеседование и будете зачислены в Полицейскую Академию.',
+        '/do В руках находится комплект служебной формы и радиостанция.',
+        '/me передал новому сотруднику комплект формы и служебную радиостанцию',
+        '/invite ' .. id,
+        'Ожидайте дальнейших указаний сотрудника академии.'
+    }, { targetId = id })
+end
+
+function interviewRefuse()
+    local reason = trim(fromBuffer(interviewState.refusalBuf))
+    if reason == '' then notify('Укажите причину отказа.'); return end
+    runInterviewStep(5, 'Отказ кандидату', {
+        'К сожалению, вы не прошли собеседование. Причина: ' .. reason .. '.'
+    })
+end
+
+function interviewBriefing()
+    runInterviewStep(6, 'Вводный инструктаж кадета', {
+        'Поздравляю с зачислением в Полицейскую Академию!',
+        'Ваша задача – прослушать курс лекций для зачисления на второй курс.',
+        'На втором курсе необходимо сдать установленные экзамены, после чего вы сможете получить звание офицера.',
+        'До соответствующего допуска запрещено покидать департамент и использовать служебный транспорт.',
+        'Также запрещено использовать государственную радиоволну, брать оружие и специальные средства.'
     })
 end
 
@@ -7031,7 +7163,6 @@ function drawSettings()
 
     elseif settingsPage == 2 then
         section('Чат')
-        if imgui.Checkbox(u8'Выделять ники подключённых игроков белым цветом', highlightNicknames) then saveConfig() end
         if imgui.Checkbox(u8'Делать ID игроков белым в чате', whiteMaskedChatIds) then saveConfig() end
         if imgui.Checkbox(u8'Делать ID над персонажами белым (экспериментально)', whiteNametagIds) then saveConfig() end
 
@@ -7144,6 +7275,11 @@ function drawSettings()
         imgui.Text(u8('Текущая версия: ' .. LOCAL_VERSION))
         if wideButton('Проверить обновление', 240) then updateState.manualCheckRequested = true end
     else
+        section('Собеседование')
+        imgui.TextWrapped(u8'Пошаговый мастер проведения собеседования. ID можно указать командой /hr ID или непосредственно в окне.')
+        if wideButton('Открыть мастер собеседования', 300) then commandInterview('') end
+        imgui.Separator()
+        imgui.Spacing()
         local commandTabs = { 'Горячие действия', 'Редактор команд' }
         commandsSettingsPage = drawCenteredTabs(commandTabs, commandsSettingsPage, 'commandSettingsTab', 220)
         if commandsSettingsPage == 1 then drawActionHotkeys() else drawCommandEditor() end
@@ -7329,8 +7465,9 @@ function drawQuickMenu(context)
     local windowWidth = expanded and 535 or 270
     -- Постоянная высота не даёт окну смещаться при переходе между разделами.
     local windowHeight = 370
-    imgui.SetNextWindowPos(imgui.ImVec2(sw * 0.5 - 135, sh * 0.5),
-        imgui.Cond.Always, imgui.ImVec2(0.0, 0.5))
+    -- Центрируется всё текущее окно, включая раскрытую правую колонку.
+    imgui.SetNextWindowPos(imgui.ImVec2(sw * 0.5, sh * 0.5),
+        imgui.Cond.Always, imgui.ImVec2(0.5, 0.5))
     imgui.SetNextWindowSize(imgui.ImVec2(windowWidth, windowHeight), imgui.Cond.Always)
     if quickMenuNeedsFocus then
         imgui.SetNextWindowFocus()
@@ -7395,6 +7532,114 @@ imgui.OnFrame(
     function(context) safeInterfaceFrame('быстрого меню', function() drawQuickMenu(context) end) end
 )
 
+function drawInterviewWindow(context)
+    context.HideCursor = false
+    context.LockPlayer = false
+    local io = imgui.GetIO()
+    imgui.SetNextWindowPos(imgui.ImVec2(io.DisplaySize.x * 0.5, io.DisplaySize.y * 0.5),
+        imgui.Cond.Always, imgui.ImVec2(0.5, 0.5))
+    imgui.SetNextWindowSize(imgui.ImVec2(760, 585), imgui.Cond.Always)
+    local flags = imgui.WindowFlags.NoResize + imgui.WindowFlags.NoMove
+        + imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoSavedSettings
+    if imgui.Begin(u8'Собеседование в Полицейскую Академию', interviewWindow, flags) then
+        imgui.AlignTextToFramePadding()
+        imgui.Text(u8'ID кандидата')
+        imgui.SameLine()
+        imgui.SetNextItemWidth(105)
+        if imgui.InputInt('##interviewTargetId', interviewState.targetId, 0, 0) then
+            if interviewState.targetId[0] < -1 then interviewState.targetId[0] = -1 end
+            if interviewState.targetId[0] > 999 then interviewState.targetId[0] = 999 end
+            resetInterviewState(interviewState.targetId[0])
+        end
+        imgui.SameLine()
+        local id, nick = getInterviewTarget()
+        if id then
+            imgui.TextColored(imgui.ImVec4(0.35, 0.85, 0.55, 1.0), u8(nick:gsub('_', ' ') .. ' [' .. id .. ']'))
+        else
+            imgui.TextDisabled(u8'кандидат не выбран или не находится в сети')
+        end
+        imgui.SameLine()
+        imgui.SetCursorPosX(imgui.GetWindowWidth() - 190)
+        imgui.TextDisabled(u8('/hr ' .. math.max(-1, interviewState.targetId[0])))
+        imgui.Separator()
+
+        imgui.Columns(2, 'interviewWizardColumns', false)
+        imgui.SetColumnWidth(0, 375)
+        section('Ход собеседования')
+        policeHelperSafeWrappedText('Запускайте следующий этап только после ответа кандидата. Повторное нажатие безопасно повторяет выбранный блок.')
+        imgui.Spacing()
+        if imgui.Button(u8'1. Приветствие и представление', imgui.ImVec2(340, 34)) then interviewGreeting() end
+        if imgui.Button(u8'2. Рассказ о себе и мотивация', imgui.ImVec2(340, 34)) then interviewQuestions() end
+        if imgui.Button(u8'3. Запросить документы', imgui.ImVec2(340, 34)) then interviewDocuments() end
+        if imgui.Button(u8'4. Изучить документы', imgui.ImVec2(340, 34)) then interviewInspectDocuments() end
+        imgui.Spacing()
+        imgui.TextDisabled(u8'Подсказка кандидату: /pass, /lic и /wbook с вашим ID.')
+        imgui.Spacing()
+        if interviewState.lastStep > 0 then
+            imgui.TextColored(imgui.ImVec4(0.35, 0.70, 1.0, 1.0),
+                u8('Последний запущенный этап: ' .. interviewState.lastStep .. ' из 6'))
+        else
+            imgui.TextDisabled(u8'Собеседование ещё не начато')
+        end
+
+        imgui.NextColumn()
+        section('Проверка кандидата')
+        imgui.Checkbox(u8'Паспорт проверен##interviewPassport', interviewState.passport)
+        imgui.Checkbox(u8'Лицензии проверены##interviewLicenses', interviewState.licenses)
+        imgui.Checkbox(u8'Выписка из тира проверена##interviewRange', interviewState.rangeStatement)
+        imgui.Checkbox(u8'Актуальные критерии соблюдены##interviewRequirements', interviewState.requirements)
+        imgui.TextDisabled(u8'Отметки не влияют на решение автоматически.')
+        imgui.Spacing()
+        imgui.Separator()
+        section('Решение')
+        local allChecked = interviewState.passport[0] and interviewState.licenses[0]
+            and interviewState.rangeStatement[0] and interviewState.requirements[0]
+        if not allChecked then
+            imgui.TextColored(imgui.ImVec4(1.0, 0.72, 0.28, 1.0), u8'Чек-лист заполнен не полностью.')
+        end
+        local acceptLabel = interviewState.acceptArmed[0]
+            and 'Подтвердить зачисление и /invite'
+            or 'Зачислить кандидата'
+        if imgui.Button(u8(acceptLabel), imgui.ImVec2(330, 34)) then
+            if interviewState.acceptArmed[0] then
+                interviewState.acceptArmed[0] = false
+                interviewAccept()
+            else
+                interviewState.acceptArmed[0] = true
+            end
+        end
+        if interviewState.acceptArmed[0] then
+            imgui.TextColored(imgui.ImVec4(1.0, 0.55, 0.22, 1.0),
+                u8'Повторное нажатие отправит /invite указанному ID.')
+        end
+        imgui.SetNextItemWidth(330)
+        imgui.InputTextWithHint('##interviewRefusal', u8'Причина отказа...',
+            interviewState.refusalBuf, ffi.sizeof(interviewState.refusalBuf))
+        if imgui.Button(u8'Сообщить об отказе', imgui.ImVec2(330, 32)) then
+            interviewState.acceptArmed[0] = false
+            interviewRefuse()
+        end
+        imgui.Spacing()
+        if imgui.Button(u8'6. Вводный инструктаж кадета', imgui.ImVec2(330, 34)) then
+            interviewState.acceptArmed[0] = false
+            interviewBriefing()
+        end
+        imgui.Columns(1)
+        imgui.Separator()
+        if imgui.SmallButton(u8'Сбросить этапы и отметки') then
+            resetInterviewState(interviewState.targetId[0])
+        end
+        imgui.SameLine()
+        imgui.TextDisabled(u8'Решение принимает сотрудник. Перед зачислением сверяйте действующие требования подразделения.')
+    end
+    imgui.End()
+end
+
+imgui.OnFrame(
+    function() return interviewWindow[0] end,
+    function(context) safeInterfaceFrame('собеседования', function() drawInterviewWindow(context) end) end
+)
+
 function drawSosConfirm(context)
     context.HideCursor = false
     context.LockPlayer = true
@@ -7428,20 +7673,28 @@ function drawUpdateConfirm(context)
     local io = imgui.GetIO()
     imgui.SetNextWindowPos(imgui.ImVec2(io.DisplaySize.x * 0.5, io.DisplaySize.y * 0.5),
         imgui.Cond.Always, imgui.ImVec2(0.5, 0.5))
-    imgui.SetNextWindowSize(imgui.ImVec2(430, 165), imgui.Cond.Always)
+    imgui.SetNextWindowSize(imgui.ImVec2(500, 190), imgui.Cond.Always)
     local flags = imgui.WindowFlags.NoResize + imgui.WindowFlags.NoMove
         + imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoSavedSettings
-    if imgui.Begin(u8'Доступно обновление', updateConfirm, flags) then
-        imgui.TextWrapped(u8('Установлена версия ' .. LOCAL_VERSION .. '. Доступна версия ' .. pendingUpdateVersion .. '. Обновить скрипт сейчас?'))
+    if imgui.Begin(u8'Обновление PoliceHelper', updateConfirm, flags) then
+        imgui.TextColored(imgui.ImVec4(1.0, 0.72, 0.30, 1.0),
+            u8('У вас установлена старая версия от ' .. formatReleaseTimestamp(LOCAL_VERSION)))
+        imgui.TextColored(imgui.ImVec4(0.35, 0.85, 0.55, 1.0),
+            u8('Доступна новая версия от ' .. formatReleaseTimestamp(pendingUpdateVersion)))
         imgui.Spacing()
-        if imgui.Button(u8'Обновить', imgui.ImVec2(195, 32)) then
+        local question = u8'Обновить PoliceHelper?'
+        imgui.SetCursorPosX(math.max(10, (imgui.GetWindowWidth() - imgui.CalcTextSize(question).x) * 0.5))
+        imgui.Text(question)
+        imgui.Spacing()
+        imgui.SetCursorPosX(math.max(10, (imgui.GetWindowWidth() - 310) * 0.5))
+        if imgui.Button(u8'Да', imgui.ImVec2(150, 34)) then
             updateConfirm[0] = false
             updateState.downloadRequest = {
                 url = pendingUpdateUrl, version = pendingUpdateVersion, token = updateState.token
             }
         end
         imgui.SameLine()
-        if imgui.Button(u8'Не сейчас', imgui.ImVec2(195, 32)) then
+        if imgui.Button(u8'Нет', imgui.ImVec2(150, 34)) then
             updateConfirm[0] = false
             pendingUpdateVersion = ''
             pendingUpdateUrl = ''
@@ -7525,6 +7778,7 @@ function main()
 
     registerSafeCommand('ph', toggleWindow)
     registerSafeCommand('phsync', requestStatsNow)
+    registerSafeCommand('hr', commandInterview)
     registerSafeCommand('nanim', commandAnimations)
     registerSafeCommand('udo', commandUdo)
     registerSafeCommand('prava', commandRights)
@@ -7611,6 +7865,7 @@ function main()
 
     editorBuiltInHandlers = {
         ph = function() toggleWindow() end, phsync = function() requestStatsNow() end,
+        hr = commandInterview,
         nanim = commandAnimations, udo = commandUdo, prava = commandRights,
         cuff = commandCuff, cf = commandCuff, uncuff = commandUncuff,
         hold = commandHold, hd = commandHold,
