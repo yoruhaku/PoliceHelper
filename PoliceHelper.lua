@@ -17,9 +17,9 @@ local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.in
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
 local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
--- Формат JSON: {"latest":"30082026_054028","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
+-- Формат JSON: {"latest":"31082026_221335","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '30082026_054028'
+LOCAL_VERSION = '31082026_221335'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -4973,7 +4973,7 @@ local helperCommandSections = {
             {'/udo', 'Представиться и показать удостоверение', '/udo'},
             {'/prava', 'Зачитать задержанному его права', '/prava'},
             {'/eject ID', 'Высадить человека из транспорта с RP', '/eject 15'},
-            {'/histid ID', 'Проверить историю персонажа', '/histid 15'},
+            {'/hist ID', 'Проверить историю персонажа', '/hist 15'},
             {'/krik', 'Громко потребовать оставаться на месте', '/krik'},
             {'/bc', 'Включить или выключить нагрудную камеру', '/bc'},
             {'/gpst', 'Объявить себя в розыск на 3 степени: GPS-трекер', '/gpst'},
@@ -5222,7 +5222,7 @@ local function commandWanted(args)
 end
 
 local function commandHistory(args)
-    local id = parseIdOnly(args, '/histid [ID]')
+    local id = parseIdOnly(args, '/hist [ID]')
     if not id then return end
     local ok, nickname = pcall(sampGetPlayerNickname, id)
     if not ok or not nickname or nickname == '' then notify('Не удалось получить ник игрока.'); return end
@@ -6189,7 +6189,10 @@ function drawCheck()
     end
 
     section('Информационные команды')
-    if wideButton('/history ID', 175) then sendOne('Проверка истории', '/history {id}', { target = true }) end
+    if wideButton('/hist ID', 175) then
+        local id, _, err = getTarget()
+        if id then commandHistory(tostring(id)) else notify(err or 'Сначала выберите игрока.') end
+    end
     if sameButton('/setmark ID', 175) then
         local id, _, err = getTarget()
         if id then commandSetmark(tostring(id)) else notify(err or 'Сначала выберите игрока.') end
@@ -7003,7 +7006,7 @@ editorCommandGroups = {
         {'tick', 'ID [поиск]', 'Умный выбор штрафа АК'}, {'vstr', 'ID', 'Штраф 25.000$ за встречную полосу – 2.7 АК'},
         {'wanted', '[1 или 2]', 'Открыть список розыска'},
         {'sm', 'ID', 'Отследить игрока'}, {'setmark', 'ID', 'Отследить игрока'},
-        {'histid', 'ID', 'Посмотреть историю игрока'}, {'wantedcar', '', 'Работа с розыском транспорта'},
+        {'hist', 'ID', 'Посмотреть историю игрока'}, {'wantedcar', '', 'Работа с розыском транспорта'},
         {'gpst', '', 'Активировать GPS-трекер'}, {'gpstc', '', 'Отключить GPS-трекер'},
         {'sos', '', 'Активировать тревожную кнопку'}, {'sosc', '', 'Отменить тревогу'}
     }},
@@ -7907,7 +7910,7 @@ function main()
     registerSafeCommand('setmark', commandSetmark)
     registerSafeCommand('eject', commandEject)
     registerSafeCommand('wanted', commandWanted)
-    registerSafeCommand('histid', commandHistory)
+    registerSafeCommand('hist', commandHistory)
     registerSafeCommand('y', commandDetentionMode)
     registerSafeCommand('krik', commandShout)
     registerSafeCommand('takelic', commandTakeLicense)
@@ -7975,7 +7978,7 @@ function main()
         m55 = commandM55, m66 = commandM66, pr = commandStopChase,
         mdk = commandMegaphoneRoadCode, mproc = commandMegaphoneProcedure,
         dor = commandMegaphoneYieldRoad, sm = commandSetmark, setmark = commandSetmark,
-        eject = commandEject, wanted = commandWanted, histid = commandHistory,
+        eject = commandEject, wanted = commandWanted, hist = commandHistory,
         y = commandDetentionMode, krik = commandShout, takelic = commandTakeLicense,
         takefish = commandTakeFish, skip = commandPass, ['break'] = commandBarrier,
         d = commandDepartmentDoors, invite = commandInvite, uninvite = commandUninvite,
