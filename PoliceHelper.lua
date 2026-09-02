@@ -17,9 +17,9 @@ local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.in
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
 local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
--- Формат JSON: {"latest":"31082026_221335","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
+-- Формат JSON: {"latest":"02092026_050633","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '31082026_221335'
+LOCAL_VERSION = '02092026_050633'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -764,6 +764,9 @@ weaponRpLastSentAt = -100.0
 sharedTrackingOfferId = -1
 sharedTrackingOfferName = ''
 sharedTrackingOfferUntil = 0.0
+sharedTrackingSwitchId = -1
+sharedTrackingSwitchName = ''
+sharedTrackingSwitchUntil = 0.0
 quickMenuBlocked = false
 quickMenuNeedsFocus = false
 quickMenuAttackBlockUntil = 0.0
@@ -1529,6 +1532,11 @@ function handleServerMessageEvent(color, text)
     local detectedName, detectedId = clean:match('^(.+)%[(%d+)%] был обнаружен в районе%s+.+$')
     detectedId = tonumber(detectedId)
     if detectedId then
+        if detectedId == sharedTrackingSwitchId then
+            sharedTrackingSwitchId = -1
+            sharedTrackingSwitchName = ''
+            sharedTrackingSwitchUntil = 0.0
+        end
         clearTrackedTarget(true)
         trackedTargetId = detectedId
         trackedTargetNickname = trim(detectedName)
@@ -1547,8 +1555,20 @@ function handleServerMessageEvent(color, text)
                 end
             end
         end)
-    elseif clean == 'Система слежения отключена' and trackedTargetId >= 0 then
+    elseif clean == 'Система слежения отключена' then
         clearTrackedTarget(true)
+        if sharedTrackingSwitchId >= 0 and os.clock() <= sharedTrackingSwitchUntil
+            and sampIsPlayerConnected(sharedTrackingSwitchId)
+        then
+            sharedTrackingOfferId = sharedTrackingSwitchId
+            sharedTrackingOfferName = sharedTrackingSwitchName
+            sharedTrackingOfferUntil = os.clock() + 12.0
+            notify('Прежнее отслеживание отключено. Y – отслеживать дело №'
+                .. sharedTrackingOfferId .. ' – ' .. sharedTrackingOfferName .. ', N – отказаться.')
+        end
+        sharedTrackingSwitchId = -1
+        sharedTrackingSwitchName = ''
+        sharedTrackingSwitchUntil = 0.0
     end
 
     local wantedNickname = clean:match('^Вы объявили ([%w_]+) в розыск%.')
@@ -5637,8 +5657,8 @@ end
 
 local function commandJailDoor(args)
     runSequence('Двери тюремных камер', {
-        '/me приложил служебную карту к панели управления дверьми тюремных камер',
-        serverCommand('jaildoor', args)
+        serverCommand('jaildoor', args),
+        '/me приложил служебную карту к панели управления дверьми тюремных камер'
     })
 end
 
@@ -8041,6 +8061,12 @@ function main()
             sharedTrackingOfferName = ''
             sharedTrackingOfferUntil = 0.0
         end
+        if sharedTrackingSwitchId >= 0 and runtimeNow > sharedTrackingSwitchUntil then
+            sharedTrackingSwitchId = -1
+            sharedTrackingSwitchName = ''
+            sharedTrackingSwitchUntil = 0.0
+            notify('Сервер не подтвердил отключение прежнего отслеживания.')
+        end
         if quickMenuPendingAction then
             local action = quickMenuPendingAction
             quickMenuPendingAction = nil
@@ -8090,12 +8116,23 @@ function main()
             elseif sharedTrackingOfferActive then
                 if wasKeyPressed(vkeys.VK_Y) then
                     local offerId = sharedTrackingOfferId
+                    local offerName = sharedTrackingOfferName
                     sharedTrackingOfferId = -1
                     sharedTrackingOfferName = ''
                     sharedTrackingOfferUntil = 0.0
-                    safeRuntimeCall('совместного GPS-отслеживания', function()
-                        commandSetmark(tostring(offerId))
-                    end)
+                    if trackedTargetId >= 0 and trackingConfirmed and trackedTargetId ~= offerId then
+                        sharedTrackingSwitchId = offerId
+                        sharedTrackingSwitchName = offerName
+                        sharedTrackingSwitchUntil = os.clock() + 15.0
+                        safeRuntimeCall('отключения прежнего GPS-отслеживания', function()
+                            sampSendChat('/setmark ' .. offerId)
+                        end)
+                        notify('Отключается прежнее отслеживание. После подтверждения сервера новая цель будет предложена повторно.')
+                    else
+                        safeRuntimeCall('совместного GPS-отслеживания', function()
+                            commandSetmark(tostring(offerId))
+                        end)
+                    end
                 elseif wasKeyPressed(vkeys.VK_N) then
                     sharedTrackingOfferId = -1
                     sharedTrackingOfferName = ''
