@@ -17,9 +17,9 @@ local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.in
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
 local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
--- Формат JSON: {"latest":"03092026_031634","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
+-- Формат JSON: {"latest":"03092026_032421","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '03092026_031634'
+LOCAL_VERSION = '03092026_032421'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -4548,7 +4548,7 @@ local function commandCuff(args)
         notify('Сначала дождитесь завершения действия: ' .. sequenceName .. '.')
         return
     end
-    local id = parseIdOnly(args, '/cuff [ID]')
+    local id = parseIdOnly(args, '/cuff или /cf [ID]')
     if not id then return end
     local _, nickname = getPlayerById(id)
     cuffRpPendingId = id
@@ -4578,7 +4578,7 @@ local function commandHold(args)
         notify('Сначала дождитесь завершения действия: ' .. sequenceName .. '.')
         return
     end
-    local id = parseIdOnly(args, '/hold [ID]')
+    local id = parseIdOnly(args, '/hold или /hd [ID]')
     if not id then return end
     local _, nickname = getPlayerById(id)
     holdRpPendingId = id
@@ -4594,7 +4594,7 @@ local function commandPutpl(args)
         notify('Сначала дождитесь завершения действия: ' .. sequenceName .. '.')
         return
     end
-    local id = parseIdOnly(args, '/putpl или /ppl [ID]')
+    local id = parseIdOnly(args, '/putpl или /pl [ID]')
     if not id then return end
     putplRpPending = true
     putplRpPendingActor = getLocalName()
@@ -4979,7 +4979,7 @@ local serverCommandSections = {
             {'/open [аргументы]', 'RP и серверная команда отправляются сразу без задержки', '/open'},
             {'/pull ID', 'Вытащить игрока из транспорта', '/pull 15'},
             {'/putpl ID', 'Посадить задержанного в патрульную машину', '/putpl 15'},
-            {'/ppl ID', 'Короткая версия /putpl с той же RP-логикой', '/ppl 15'},
+            {'/pl ID', 'Короткая версия /putpl с той же RP-логикой', '/pl 15'},
             {'/search ID основание', 'Универсальный обыск без навязанного типа; основание обязательно', '/search 15 Обыск при задержании'},
             {'/se ID основание', 'Короткая версия /search с той же RP-логикой', '/se 15 Обыск при задержании'},
             {'/setmark ID', 'Команда отправляется сразу; RP только после успешного обнаружения', '/setmark 15'},
@@ -6088,6 +6088,17 @@ local function drawCommands()
     drawPageHeader('Команды', 'Серверные возможности и автоматизированные RP-команды PoliceHelper')
     commandListMode = drawCenteredTabs({ 'Серверные команды', 'Команды PoliceHelper' }, commandListMode, 'commandMode', 230)
     imgui.Spacing()
+    local interviewButtonWidth = 300
+    local interviewButtonStartX = imgui.GetCursorPosX()
+    local interviewButtonArea = imgui.GetContentRegionAvail().x
+    imgui.SetCursorPosX(interviewButtonStartX + math.max(0, (interviewButtonArea - interviewButtonWidth) * 0.5))
+    if imgui.Button(u8'Открыть мастер собеседования', imgui.ImVec2(interviewButtonWidth, 30)) then
+        commandInterview('')
+    end
+    imgui.SetCursorPosX(interviewButtonStartX)
+    imgui.Spacing()
+    imgui.Separator()
+    imgui.Spacing()
     imgui.BeginChild('##stableCommandList', imgui.ImVec2(0, 0), false)
     local sections = commandListMode == 1 and serverCommandSections or helperCommandSections
     for index, block in ipairs(sections) do
@@ -7049,7 +7060,7 @@ editorCommandGroups = {
         {'krik', '', 'Громко потребовать остановиться'}, {'cuff', 'ID', 'Надеть наручники'},
         {'uncuff', 'ID', 'Снять наручники'}, {'hold', 'ID', 'Вести задержанного'},
         {'search', 'ID основание', 'Провести обыск'}, {'se', 'ID основание', 'Короткая версия /search'},
-        {'putpl', 'ID', 'Посадить в транспорт'}, {'ppl', 'ID', 'Короткая версия /putpl'},
+        {'putpl', 'ID', 'Посадить в транспорт'}, {'pl', 'ID', 'Короткая версия /putpl'},
         {'pull', 'ID', 'Вытащить из транспорта'}, {'arrest', 'ID причина', 'Передать задержанного в участок'},
         {'y', 'ID', 'Активировать режим задержания'}, {'untie', 'ID', 'Освободить заложника'}
     }},
@@ -7429,11 +7440,6 @@ function drawSettings()
         imgui.Text(u8('Текущая версия: ' .. LOCAL_VERSION))
         if wideButton('Проверить обновление', 240) then updateState.manualCheckRequested = true end
     else
-        section('Собеседование')
-        imgui.TextWrapped(u8'Пошаговый мастер проведения собеседования. ID можно указать командой /hr ID или непосредственно в окне.')
-        if wideButton('Открыть мастер собеседования', 300) then commandInterview('') end
-        imgui.Separator()
-        imgui.Spacing()
         local commandTabs = { 'Горячие действия', 'Редактор команд' }
         commandsSettingsPage = drawCenteredTabs(commandTabs, commandsSettingsPage, 'commandSettingsTab', 220)
         if commandsSettingsPage == 1 then drawActionHotkeys() else drawCommandEditor() end
@@ -7945,7 +7951,7 @@ function main()
     registerSafeCommand('search', commandSearch)
     registerSafeCommand('se', commandSearch)
     registerSafeCommand('putpl', commandPutpl)
-    registerSafeCommand('ppl', commandPutpl)
+    registerSafeCommand('pl', commandPutpl)
     registerSafeCommand('pull', commandPull)
     registerSafeCommand('arrest', commandArrest)
     registerSafeCommand('clear', commandClear)
@@ -8028,7 +8034,7 @@ function main()
         cuff = commandCuff, cf = commandCuff, uncuff = commandUncuff,
         hold = commandHold, hd = commandHold,
         search = commandSearch, se = commandSearch,
-        putpl = commandPutpl, ppl = commandPutpl, pull = commandPull,
+        putpl = commandPutpl, pl = commandPutpl, pull = commandPull,
         arrest = commandArrest, clear = commandClear, su = commandSu,
         pg = commandQuickDisobedience, vn = commandQuickArmedAttack,
         sus = commandSmartWanted, ticket = commandTicket, tick = commandSmartTicket,
