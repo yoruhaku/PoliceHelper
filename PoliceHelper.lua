@@ -17,9 +17,9 @@ local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.in
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
 local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
--- Формат JSON: {"latest":"02092026_050633","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
+-- Формат JSON: {"latest":"03092026_031634","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '02092026_050633'
+LOCAL_VERSION = '03092026_031634'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -728,6 +728,11 @@ uncuffRpPendingUntil = 0.0
 holdRpPendingId = -1
 holdRpPendingNickname = ''
 holdRpPendingUntil = 0.0
+putplRpPending = false
+putplRpPendingActor = ''
+putplRpPendingUntil = 0.0
+putplRpClosePending = false
+putplRpCloseAt = 0.0
 trackedMapId = -1
 trackedNameTextdrawId = -1
 trackedPointTextdrawId = -1
@@ -1484,6 +1489,28 @@ function handleServerMessageEvent(color, text)
                 holdRpPendingNickname = ''
                 holdRpPendingUntil = 0.0
                 sampSendChat('/me аккуратно взял задержанного под руку и повёл за собой')
+            end
+        end
+    end
+
+    if putplRpPending then
+        if os.clock() > putplRpPendingUntil then
+            putplRpPending = false
+            putplRpPendingActor = ''
+            putplRpPendingUntil = 0.0
+        else
+            local ownActionText = confirmationText:gsub('_', ' ')
+            local putplConfirmed = putplRpPendingActor ~= ''
+                and (ownActionText:find(' ' .. putplRpPendingActor .. ' посадил ', 1, true)
+                    or ownActionText:find(' ' .. putplRpPendingActor .. ' посадила ', 1, true))
+                and ownActionText:find(' в машину', 1, true)
+            if putplConfirmed then
+                putplRpPending = false
+                putplRpPendingActor = ''
+                putplRpPendingUntil = 0.0
+                sampSendChat('/me придерживая задержанного, помог ему сесть на заднее сиденье')
+                putplRpClosePending = true
+                putplRpCloseAt = os.clock() + math.max(0, delayMs[0]) / 1000.0
             end
         end
     end
@@ -4563,13 +4590,20 @@ local function commandHold(args)
 end
 
 local function commandPutpl(args)
-    local id = parseIdOnly(args, '/putpl [ID]')
+    if sequenceBusy then
+        notify('Сначала дождитесь завершения действия: ' .. sequenceName .. '.')
+        return
+    end
+    local id = parseIdOnly(args, '/putpl или /ppl [ID]')
     if not id then return end
+    putplRpPending = true
+    putplRpPendingActor = getLocalName()
+    putplRpPendingUntil = os.clock() + 15.0
+    putplRpClosePending = false
+    putplRpCloseAt = 0.0
     runSequence('Посадка в автомобиль', {
         '/me открыл заднюю пассажирскую дверь патрульного автомобиля.',
-        '/me придерживая задержанного, помог ему сесть на заднее сиденье.',
-        '/putpl {id}',
-        '/me закрыл дверь патрульного автомобиля.'
+        '/putpl {id}'
     }, { targetId = id })
 end
 
@@ -4628,7 +4662,7 @@ end
 local function commandSearch(args)
     local id, reason = trim(args):match('^(%d+)%s+(.+)$')
     if not id or trim(reason) == '' then
-        notify('Использование: /search [ID] [основание]')
+        notify('Использование: /search или /se [ID] [основание]')
         return
     end
     runSequence('Обыск', {
@@ -4945,7 +4979,9 @@ local serverCommandSections = {
             {'/open [аргументы]', 'RP и серверная команда отправляются сразу без задержки', '/open'},
             {'/pull ID', 'Вытащить игрока из транспорта', '/pull 15'},
             {'/putpl ID', 'Посадить задержанного в патрульную машину', '/putpl 15'},
+            {'/ppl ID', 'Короткая версия /putpl с той же RP-логикой', '/ppl 15'},
             {'/search ID основание', 'Универсальный обыск без навязанного типа; основание обязательно', '/search 15 Обыск при задержании'},
+            {'/se ID основание', 'Короткая версия /search с той же RP-логикой', '/se 15 Обыск при задержании'},
             {'/setmark ID', 'Команда отправляется сразу; RP только после успешного обнаружения', '/setmark 15'},
             {'/signal [аргументы]', 'Установить сигнализацию в бизнесе по заявке владельца', '/signal'},
             {'/skip ID', 'Выдать пропуск на объект с ограниченным доступом', '/skip 15'},
@@ -4957,6 +4993,7 @@ local serverCommandSections = {
             {'/uncuff ID', 'Снять наручники', '/uncuff 15'},
             {'/unmask ID', 'Снять маску с игрока; RP выполняется после подтверждения сервера', '/unmask 15'},
             {'/wanted [1/2]', 'Игроки или транспорт; без аргумента открывается список игроков', '/wanted 1'},
+            {'/wd [1/2]', 'Короткая версия /wanted', '/wd 1'},
             {'/wantedcar аргументы', 'Объявить транспорт в розыск', '/wantedcar 411'}
         }
     },
@@ -6285,12 +6322,8 @@ function drawDetention()
     imgui.NextColumn()
     section('Транспортировка')
     if wideButton('Посадить в крузер', 210) then
-        runSequence('Посадка в автомобиль', {
-            '/me открыл заднюю пассажирскую дверь патрульного автомобиля.',
-            '/me придерживая задержанного, помог ему сесть на заднее сиденье.',
-            '/putpl {id}',
-            '/me закрыл дверь патрульного автомобиля.'
-        }, { target = true })
+        local id, _, err = getTarget()
+        if id then commandPutpl(tostring(id)) else notify(err or 'Сначала выберите игрока.') end
     end
     if wideButton('Вытащить из транспорта', 210) then
         local id, _, err = getTarget()
@@ -7015,7 +7048,8 @@ editorCommandGroups = {
         {'ln', 'текст', 'OOC-чат руководителей'},
         {'krik', '', 'Громко потребовать остановиться'}, {'cuff', 'ID', 'Надеть наручники'},
         {'uncuff', 'ID', 'Снять наручники'}, {'hold', 'ID', 'Вести задержанного'},
-        {'search', 'ID основание', 'Провести обыск'}, {'putpl', 'ID', 'Посадить в транспорт'},
+        {'search', 'ID основание', 'Провести обыск'}, {'se', 'ID основание', 'Короткая версия /search'},
+        {'putpl', 'ID', 'Посадить в транспорт'}, {'ppl', 'ID', 'Короткая версия /putpl'},
         {'pull', 'ID', 'Вытащить из транспорта'}, {'arrest', 'ID причина', 'Передать задержанного в участок'},
         {'y', 'ID', 'Активировать режим задержания'}, {'untie', 'ID', 'Освободить заложника'}
     }},
@@ -7024,7 +7058,7 @@ editorCommandGroups = {
         {'pg', 'ID', 'Неподчинение – 9.1 УК, 3 уровень'}, {'vn', 'ID', 'Вооружённое нападение – 2.1 УК, 6 уровень'},
         {'clear', 'ID причина', 'Снять розыск'}, {'ticket', 'ID сумма причина', 'Выписать штраф'},
         {'tick', 'ID [поиск]', 'Умный выбор штрафа АК'}, {'vstr', 'ID', 'Штраф 25.000$ за встречную полосу – 2.7 АК'},
-        {'wanted', '[1 или 2]', 'Открыть список розыска'},
+        {'wanted', '[1 или 2]', 'Открыть список розыска'}, {'wd', '[1 или 2]', 'Короткая версия /wanted'},
         {'sm', 'ID', 'Отследить игрока'}, {'setmark', 'ID', 'Отследить игрока'},
         {'hist', 'ID', 'Посмотреть историю игрока'}, {'wantedcar', '', 'Работа с розыском транспорта'},
         {'gpst', '', 'Активировать GPS-трекер'}, {'gpstc', '', 'Отключить GPS-трекер'},
@@ -7909,7 +7943,9 @@ function main()
     registerSafeCommand('hold', commandHold)
     registerSafeCommand('hd', commandHold)
     registerSafeCommand('search', commandSearch)
+    registerSafeCommand('se', commandSearch)
     registerSafeCommand('putpl', commandPutpl)
+    registerSafeCommand('ppl', commandPutpl)
     registerSafeCommand('pull', commandPull)
     registerSafeCommand('arrest', commandArrest)
     registerSafeCommand('clear', commandClear)
@@ -7930,6 +7966,7 @@ function main()
     registerSafeCommand('setmark', commandSetmark)
     registerSafeCommand('eject', commandEject)
     registerSafeCommand('wanted', commandWanted)
+    registerSafeCommand('wd', commandWanted)
     registerSafeCommand('hist', commandHistory)
     registerSafeCommand('y', commandDetentionMode)
     registerSafeCommand('krik', commandShout)
@@ -7990,7 +8027,8 @@ function main()
         nanim = commandAnimations, udo = commandUdo, prava = commandRights,
         cuff = commandCuff, cf = commandCuff, uncuff = commandUncuff,
         hold = commandHold, hd = commandHold,
-        search = commandSearch, putpl = commandPutpl, pull = commandPull,
+        search = commandSearch, se = commandSearch,
+        putpl = commandPutpl, ppl = commandPutpl, pull = commandPull,
         arrest = commandArrest, clear = commandClear, su = commandSu,
         pg = commandQuickDisobedience, vn = commandQuickArmedAttack,
         sus = commandSmartWanted, ticket = commandTicket, tick = commandSmartTicket,
@@ -7998,7 +8036,7 @@ function main()
         m55 = commandM55, m66 = commandM66, pr = commandStopChase,
         mdk = commandMegaphoneRoadCode, mproc = commandMegaphoneProcedure,
         dor = commandMegaphoneYieldRoad, sm = commandSetmark, setmark = commandSetmark,
-        eject = commandEject, wanted = commandWanted, hist = commandHistory,
+        eject = commandEject, wanted = commandWanted, wd = commandWanted, hist = commandHistory,
         y = commandDetentionMode, krik = commandShout, takelic = commandTakeLicense,
         takefish = commandTakeFish, skip = commandPass, ['break'] = commandBarrier,
         d = commandDepartmentDoors, invite = commandInvite, uninvite = commandUninvite,
@@ -8049,6 +8087,13 @@ function main()
             end
         end
         local runtimeNow = os.clock()
+        if putplRpClosePending and runtimeNow >= putplRpCloseAt then
+            putplRpClosePending = false
+            putplRpCloseAt = 0.0
+            safeRuntimeCall('завершения посадки в транспорт', function()
+                sampSendChat('/me закрыл дверь патрульного автомобиля')
+            end)
+        end
         if pendingWantedTargetId >= 0 and runtimeNow > pendingWantedExpiresAt then
             pendingWantedTargetId = -1
             pendingWantedTargetNickname = ''
