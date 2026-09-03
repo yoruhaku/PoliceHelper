@@ -17,9 +17,9 @@ local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.in
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
 local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
--- Формат JSON: {"latest":"03092026_032421","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
+-- Формат JSON: {"latest":"03092026_033709","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '03092026_032421'
+LOCAL_VERSION = '03092026_033709'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -5033,10 +5033,10 @@ local helperCommandSections = {
             {'/hist ID', 'Проверить историю персонажа', '/hist 15'},
             {'/krik', 'Громко потребовать оставаться на месте', '/krik'},
             {'/bc', 'Включить или выключить нагрудную камеру', '/bc'},
-            {'/gpst', 'Объявить себя в розыск на 3 степени: GPS-трекер', '/gpst'},
-            {'/gpstc', 'Снять с себя розыск: GPS OFF, затем доложить в /f', '/gpstc'},
+            {'/gpson', 'Объявить себя в розыск на 3 степени: GPS-трекер', '/gpson'},
+            {'/gpsoff', 'Снять с себя розыск: GPS OFF, затем доложить в /f', '/gpsoff'},
             {'/sos', 'Подтвердить и активировать тревожную кнопку', '/sos'},
-            {'/sosc', 'Отменить тревогу и снять розыск с причиной GPS OFF', '/sosc'}
+            {'/sosoff', 'Отменить тревогу и снять розыск с причиной GPS OFF', '/sosoff'}
         }
     },
     {
@@ -5067,15 +5067,15 @@ local helperCommandSections = {
             {'/m55', "Начать 10-55: доклад в /r и команды мегафона", '/m55'},
             {'/m66', "Начать 10-66: доклад в /r и команды мегафона", '/m66'},
             {'/pr', 'Потребовать прекратить преследование', '/pr'},
-            {'/mdk', 'Потребовать соблюдать дорожный кодекс', '/mdk'},
-            {'/mproc', 'Потребовать не мешать процессуальным действиям', '/mproc'},
+            {'/dk', 'Потребовать соблюдать дорожный кодекс', '/dk'},
+            {'/proc', 'Потребовать не мешать процессуальным действиям', '/proc'},
             {'/dor', 'Потребовать уступить дорогу служебному автомобилю', '/dor'},
             {'/rstart', 'Передать доклад о начале патруля', '/rstart'},
             {'/rpat', 'Передать текущий статус патруля', '/rpat'},
             {'/rend', 'Передать доклад о завершении патруля', '/rend'},
             {'/r4', 'Передать состав патруля и состояние 10-4', '/r4'},
             {'/r20', 'Передать текущее местоположение', '/r20'},
-            {'/backup', 'Запросить срочную поддержку по местоположению', '/backup'}
+            {'/r3', 'Запросить срочную поддержку по местоположению', '/r3'}
         }
     },
     {
@@ -5657,18 +5657,16 @@ function commandFollowOff()
 end
 
 function commandPhoneAccept()
-    runSequence('Ответ на звонок', {
-        '/me достал телефон и принял входящий вызов',
-        '/p'
-    })
+    sampSendChat('/me достал телефон и принял входящий вызов')
+    sampSendChat('/p')
+    addLog('Ответ на звонок')
     incomingCallUntil = 0.0
 end
 
 function commandPhoneDecline()
-    runSequence('Отклонение звонка', {
-        '/me достал телефон, отклонил входящий вызов и убрал устройство обратно',
-        '/h'
-    })
+    sampSendChat('/me достал телефон, отклонил входящий вызов и убрал устройство обратно')
+    sampSendChat('/h')
+    addLog('Отклонение звонка')
     incomingCallUntil = 0.0
 end
 
@@ -6130,7 +6128,7 @@ local function drawRadioGuide()
     imgui.NextColumn()
     section('Поддержка и остановки')
     drawCommandRows({
-        {'/backup', 'CODE-3, запросить срочную поддержку'},
+        {'/r3', 'CODE-3, запросить срочную поддержку'},
         {'/m55', 'Обычный трафик-стоп 10-55'},
         {'/m66', 'Трафик-стоп повышенного риска 10-66'},
         {'/dor', 'Потребовать уступить дорогу служебному автомобилю'},
@@ -7072,17 +7070,17 @@ editorCommandGroups = {
         {'wanted', '[1 или 2]', 'Открыть список розыска'}, {'wd', '[1 или 2]', 'Короткая версия /wanted'},
         {'sm', 'ID', 'Отследить игрока'}, {'setmark', 'ID', 'Отследить игрока'},
         {'hist', 'ID', 'Посмотреть историю игрока'}, {'wantedcar', '', 'Работа с розыском транспорта'},
-        {'gpst', '', 'Активировать GPS-трекер'}, {'gpstc', '', 'Отключить GPS-трекер'},
-        {'sos', '', 'Активировать тревожную кнопку'}, {'sosc', '', 'Отменить тревогу'}
+        {'gpson', '', 'Активировать GPS-трекер'}, {'gpsoff', '', 'Отключить GPS-трекер'},
+        {'sos', '', 'Активировать тревожную кнопку'}, {'sosoff', '', 'Отменить тревогу'}
     }},
     { title = 'Мегафон', items = {
         {'m55', '', 'Трафик-стоп 10-55'}, {'m66', '', 'Трафик-стоп 10-66'},
-        {'dor', '', 'Потребовать уступить дорогу'}, {'mdk', '', 'Потребовать соблюдать дорожный кодекс'},
-        {'mproc', '', 'Потребовать не мешать сотрудникам'}, {'pr', '', 'Потребовать прекратить преследование'}
+        {'dor', '', 'Потребовать уступить дорогу'}, {'dk', '', 'Потребовать соблюдать дорожный кодекс'},
+        {'proc', '', 'Потребовать не мешать сотрудникам'}, {'pr', '', 'Потребовать прекратить преследование'}
     }},
     { title = 'Рация и патруль', items = {
         {'r4', '', 'Передать состав и состояние 10-4'}, {'r20', '', 'Передать текущее местоположение'},
-        {'backup', '', 'Запросить срочную поддержку'}, {'rstart', '', 'Начать патруль'},
+        {'r3', '', 'Запросить срочную поддержку'}, {'rstart', '', 'Начать патруль'},
         {'rpat', '', 'Передать статус патруля'}, {'rend', '', 'Закончить патруль'}
     }},
     { title = 'Команды МВД', items = {
@@ -7965,8 +7963,8 @@ function main()
     registerSafeCommand('m55', commandM55)
     registerSafeCommand('m66', commandM66)
     registerSafeCommand('pr', commandStopChase)
-    registerSafeCommand('mdk', commandMegaphoneRoadCode)
-    registerSafeCommand('mproc', commandMegaphoneProcedure)
+    registerSafeCommand('dk', commandMegaphoneRoadCode)
+    registerSafeCommand('proc', commandMegaphoneProcedure)
     registerSafeCommand('dor', commandMegaphoneYieldRoad)
     registerSafeCommand('sm', commandSetmark)
     registerSafeCommand('setmark', commandSetmark)
@@ -8010,17 +8008,17 @@ function main()
     registerSafeCommand('mask', commandMask)
     registerSafeCommand('unmask', commandUnmask)
     registerSafeCommand('healme', commandHealme)
-    registerSafeCommand('gpst', commandGpsTracker)
-    registerSafeCommand('gpstc', commandGpsTrackerClear)
+    registerSafeCommand('gpson', commandGpsTracker)
+    registerSafeCommand('gpsoff', commandGpsTrackerClear)
     registerSafeCommand('sos', commandSos)
-    registerSafeCommand('sosc', commandSosCancel)
+    registerSafeCommand('sosoff', commandSosCancel)
     registerSafeCommand('r4', function()
         radio('| Состав: {crew} | Состояние: 10-4')
     end)
     registerSafeCommand('r20', function()
         radio('10-20: {place}. Состояние: 10-4, доступен.')
     end)
-    registerSafeCommand('backup', function()
+    registerSafeCommand('r3', function()
         radio('CODE-3, требуется срочная поддержка. 10-20: {place}.')
     end)
     registerSafeCommand('rstart', commandPatrolStart)
@@ -8040,7 +8038,7 @@ function main()
         sus = commandSmartWanted, ticket = commandTicket, tick = commandSmartTicket,
         vstr = commandQuickOncomingTicket,
         m55 = commandM55, m66 = commandM66, pr = commandStopChase,
-        mdk = commandMegaphoneRoadCode, mproc = commandMegaphoneProcedure,
+        dk = commandMegaphoneRoadCode, proc = commandMegaphoneProcedure,
         dor = commandMegaphoneYieldRoad, sm = commandSetmark, setmark = commandSetmark,
         eject = commandEject, wanted = commandWanted, wd = commandWanted, hist = commandHistory,
         y = commandDetentionMode, krik = commandShout, takelic = commandTakeLicense,
@@ -8055,11 +8053,11 @@ function main()
         tow = commandTow, wantedcar = commandWantedCar, fbi = commandFbiDoor,
         follow = commandFollow, hack = commandHack, names = commandNames,
         untie = commandUntie, bc = commandBodycam, mask = commandMask,
-        unmask = commandUnmask, healme = commandHealme, gpst = commandGpsTracker,
-        gpstc = commandGpsTrackerClear, sos = commandSos, sosc = commandSosCancel,
+        unmask = commandUnmask, healme = commandHealme, gpson = commandGpsTracker,
+        gpsoff = commandGpsTrackerClear, sos = commandSos, sosoff = commandSosCancel,
         r4 = function() radio('| Состав: {crew} | Состояние: 10-4') end,
         r20 = function() radio('10-20: {place}. Состояние: 10-4, доступен.') end,
-        backup = function() radio('CODE-3, требуется срочная поддержка. 10-20: {place}.') end,
+        r3 = function() radio('CODE-3, требуется срочная поддержка. 10-20: {place}.') end,
         rstart = commandPatrolStart, rpat = commandPatrolStatus, rend = commandPatrolEnd
     }
     for commandName in pairs(editorBuiltInHandlers) do editorReservedCommands[commandName] = true end
