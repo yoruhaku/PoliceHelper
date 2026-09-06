@@ -17,9 +17,9 @@ local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.in
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
 local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
--- Формат JSON: {"latest":"03092026_051654","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
+-- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '03092026_051654'
+LOCAL_VERSION = '06092026_035759'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -1842,12 +1842,8 @@ function handleAutoFuel(dialogId, style, button1, text)
     local liters = tonumber(cleanText:match('В ваш транспорт поместится ещё%s+(%d+)%s+л'))
     if not liters or liters < 1 or os.clock() - lastAutoFuelAt < 1.0 then return end
     lastAutoFuelAt = os.clock()
-    lua_thread.create(function()
-        wait(100)
-        if autoFuel[0] and sampIsDialogActive() then
-            sampSendDialogResponse(dialogId, 1, 65535, tostring(liters))
-        end
-    end)
+    local sent = pcall(sampSendDialogResponse, dialogId, 1, 65535, tostring(liters))
+    if sent then return true end
 end
 
 function handleCleanOnlineDialog(title, text)
@@ -1871,7 +1867,7 @@ end
 
 function handleShowDialogEvent(dialogId, style, title, button1, button2, text)
     if handleAutoEquipment(dialogId, style, button1, text) then return false end
-    handleAutoFuel(dialogId, style, button1, text)
+    if handleAutoFuel(dialogId, style, button1, text) then return false end
     handleCleanOnlineDialog(title, text)
     if profileManual[0] or not statsRequestPending then return end
 
@@ -7349,7 +7345,7 @@ function drawSettings()
         if imgui.Checkbox(u8'Автоматически отправлять /eat при получении подноса', autoEat) then saveConfig() end
         imgui.TextWrapped(u8'Команда отправляется через 1000 мс после серверной подсказки.')
         if imgui.Checkbox(u8'Автоматически заправлять транспорт до полного бака', autoFuel) then saveConfig() end
-        imgui.TextWrapped(u8'В окне АЗС количество литров определяется по тексту. Заголовок и ID диалога значения не имеют.')
+        imgui.TextWrapped(u8'В окне АЗС количество литров определяется по тексту. Заголовок и ID диалога значения не имеют, окно скрывается автоматически.')
         imgui.TextWrapped(u8'В окне «Точное время» чистый онлайн рассчитывается автоматически: из времени в игре вычитается AFK за сегодня.')
         if imgui.Checkbox(u8'Автоматически сообщать о дамагере', autoReportDamager) then
             damagerKillTimes = {}
