@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '09092026_000753'
+LOCAL_VERSION = '09092026_030400'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -1482,23 +1482,42 @@ function processUpdaterMainThread()
 end
 
 familyReservedTags = {
-    V = true, J = true, JN = true, G = true, P = true, R = true, F = true,
-    D = true, L = true, A = true, LS = true, SF = true, LV = true,
-    ['Всем постам'] = true
+    V = true, J = true, JN = true, G = true, P = true, R = true, RN = true,
+    F = true, FN = true, D = true, L = true, A = true, I = true, S = true,
+    LS = true, SF = true, LV = true, PC = true, TV = true,
+    ['Тел'] = true, ['Стол'] = true, ['ТВ центр'] = true, ['ТВ-центр'] = true,
+    ['Радио ЛС'] = true, ['Радио СФ'] = true, ['Радио ЛВ'] = true,
+    ['Всем постам'] = true, ['Ошибка'] = true, ['Диспетчер'] = true,
+    SIGNAL = true, BANK = true, PVP = true, Admin = true,
+    AntiDepozit = true, GunGame = true
 }
 
--- Семейный тег задаётся игроками, поэтому запоминаем его по безопасной структуре строки.
--- После определения тега скрываются и обычный чат, и любые системные уведомления семьи.
+-- Семейный тег задаётся игроками, поэтому определяем его только по характерной
+-- структуре с рангом перед ником или по явному системному упоминанию семьи.
+-- Это не даёт принять телефон, радио, телевидение и другие каналы за семейный чат.
 function isFamilyMessage(clean)
     local tag, remainder = tostring(clean or ''):match('^%[([^%[%]]+)%]%s+(.+)$')
     if not tag or familyReservedTags[tag] then return false end
     if detectedFamilyTags[tag] then return true end
 
-    local _, nicknameEnd = remainder:find('[%a%d]+_[%a%d]+')
-    if not nicknameEnd then return false end
+    local nicknameStart, nicknameEnd = remainder:find('[%a%d]+_[%a%d]+')
+    if not nicknameStart then return false end
+
+    local prefix = trim(remainder:sub(1, nicknameStart - 1))
     local suffix = remainder:sub(nicknameEnd + 1)
-    if suffix:match('^%[%d+%]') then return false end
-    if not suffix:match('^%s*:') and not lowerCp1251(remainder):find('сем', 1, true) then return false end
+    if suffix:match('^%s*%[%d+%]') or suffix:match('^%s*%[ID:%d+%]') then return false end
+
+    local lowered = lowerCp1251(' ' .. remainder)
+    local explicitFamily = lowered:find(' в семью', 1, true)
+        or lowered:find(' из семьи', 1, true)
+        or lowered:find(' семьи', 1, true)
+        or lowered:find(' семье', 1, true)
+        or lowered:find(' семейн', 1, true)
+
+    if not explicitFamily then
+        if prefix == '' or prefix:find('[', 1, true) or prefix:find(']', 1, true) then return false end
+        if not suffix:match('^%s*:') then return false end
+    end
 
     detectedFamilyTags[tag] = true
     return true
