@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | —оздано с любовью от Ravenhush Ashbluff <3'
 -- ¬ерси€ состоит из даты и времени публикации: ƒƒћћ√√√√_„„ћћ——.
 -- ‘ормат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '09092026_043910'
+LOCAL_VERSION = '10092026_024510'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Ќазвани€ автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -740,6 +740,9 @@ uncuffRpPendingUntil = 0.0
 holdRpPendingId = -1
 holdRpPendingNickname = ''
 holdRpPendingUntil = 0.0
+detentionRpPendingId = -1
+detentionRpPendingNickname = ''
+detentionRpPendingUntil = 0.0
 putplRpPending = false
 putplRpPendingActor = ''
 putplRpPendingUntil = 0.0
@@ -953,7 +956,7 @@ roleplayCatalog = {
     { name = 'hack', title = '/hack Ц взломать дверь', body = '/do ¬ подсумке находитс€ набор инструментов дл€ вскрыти€ замков.\n/me достал инструменты, вставил отмычку в замочную скважину и провернул еЄ' },
     { name = 'names', title = '/names Ц истори€ имЄн', body = '/me открыл защищЄнную базу данных и перешЄл к истории имЄн прикрыти€' },
     { name = 'untie', title = '/untie Ц освободить заложника', body = '/me осмотрел удерживающие заложника верЄвки и осторожно ослабил узлы\n/me сн€л верЄвки и освободил заложника' },
-    { name = 'y', title = '/y Ц режим задержани€', body = '/me ввЄл данные задержанного в служебный планшет и активировал режим задержани€' },
+    { name = 'y', title = '/y Ц режим задержани€', body = '/me активировал режим задержани€ в служебном планшете' },
     { name = 'eject', title = '/eject Ц высадить пассажира', body = '/me открыл дверь своего транспорта и помог пассажиру покинуть салон' },
     { name = 'open', title = '/open Ц управление шлагбаумом', body = '/me воспользовалс€ служебным пультом управлени€ шлагбаумом' },
     { name = 'door_open', title = '/d Ц открыть дверь', body = '/me нажал кнопку на служебной панели управлени€ и открыл дверь' },
@@ -1604,6 +1607,28 @@ function handleServerMessageEvent(color, text)
                 holdRpPendingNickname = ''
                 holdRpPendingUntil = 0.0
                 sampSendChat(configuredRoleplayLine('hold', 1, '/me аккуратно вз€л задержанного под руку и повЄл за собой'))
+            end
+        end
+    end
+
+    if detentionRpPendingId >= 0 then
+        if os.clock() > detentionRpPendingUntil then
+            detentionRpPendingId = -1
+            detentionRpPendingNickname = ''
+            detentionRpPendingUntil = 0.0
+        else
+            local detentionNickname = confirmationText:match(
+                '^([%w_]+) попал[аи]? в ¬аше поле зрени€%.'
+            )
+            if detentionNickname
+                and (detentionRpPendingNickname == '' or detentionNickname == detentionRpPendingNickname)
+            then
+                detentionRpPendingId = -1
+                detentionRpPendingNickname = ''
+                detentionRpPendingUntil = 0.0
+                sampSendChat(configuredRoleplayLine(
+                    'y', 1, '/me активировал режим задержани€ в служебном планшете'
+                ))
             end
         end
     end
@@ -5948,10 +5973,12 @@ end
 local function commandDetentionMode(args)
     local id = parseIdOnly(args, '/y [ID]')
     if not id then return end
-    runSequence('–ежим задержани€', {
-        '/me ввЄл данные задержанного в служебный планшет и активировал режим задержани€',
-        '/y {id}'
-    }, { targetId = id })
+    detentionRpPendingId = id
+    detentionRpPendingNickname = ''
+    detentionRpPendingUntil = os.clock() + 6.0
+    local ok, nickname = pcall(sampGetPlayerNickname, id)
+    if ok and type(nickname) == 'string' then detentionRpPendingNickname = nickname end
+    sampSendChat('/y ' .. id)
 end
 
 function handleWindowMessageEvent(message, wparam, lparam)
