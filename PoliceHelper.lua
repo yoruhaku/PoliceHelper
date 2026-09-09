@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '09092026_030400'
+LOCAL_VERSION = '09092026_043910'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -695,7 +695,6 @@ editorBuiltInHandlers = {}
 editorReservedCommands = {}
 actionHotkeys = {}
 commandsSettingsPage = 1
-detectedFamilyTags = {}
 roleplayOverrides = {}
 roleplayEditorSearchBuf = newBuffer(96, '')
 roleplayEditorBodyBuf = newBuffer(4096, '')
@@ -1488,39 +1487,34 @@ familyReservedTags = {
     ['Тел'] = true, ['Стол'] = true, ['ТВ центр'] = true, ['ТВ-центр'] = true,
     ['Радио ЛС'] = true, ['Радио СФ'] = true, ['Радио ЛВ'] = true,
     ['Всем постам'] = true, ['Ошибка'] = true, ['Диспетчер'] = true,
-    SIGNAL = true, BANK = true, PVP = true, Admin = true,
-    AntiDepozit = true, GunGame = true
+    SIGNAL = true, BANK = true, PVP = true, Admin = true, GunGame = true
 }
 
--- Семейный тег задаётся игроками, поэтому определяем его только по характерной
--- структуре с рангом перед ником или по явному системному упоминанию семьи.
--- Это не даёт принять телефон, радио, телевидение и другие каналы за семейный чат.
+-- Каждую строку проверяем отдельно: название семьи не сохраняется и не сравнивается.
+-- Семейные сообщения определяются по структуре с рангом перед ником либо по тексту
+-- системного уведомления о семье. Серверные каналы заранее исключены.
 function isFamilyMessage(clean)
     local tag, remainder = tostring(clean or ''):match('^%[([^%[%]]+)%]%s+(.+)$')
     if not tag or familyReservedTags[tag] then return false end
-    if detectedFamilyTags[tag] then return true end
-
-    local nicknameStart, nicknameEnd = remainder:find('[%a%d]+_[%a%d]+')
-    if not nicknameStart then return false end
-
-    local prefix = trim(remainder:sub(1, nicknameStart - 1))
-    local suffix = remainder:sub(nicknameEnd + 1)
-    if suffix:match('^%s*%[%d+%]') or suffix:match('^%s*%[ID:%d+%]') then return false end
 
     local lowered = lowerCp1251(' ' .. remainder)
     local explicitFamily = lowered:find(' в семью', 1, true)
+        or lowered:find(' семью', 1, true)
         or lowered:find(' из семьи', 1, true)
         or lowered:find(' семьи', 1, true)
         or lowered:find(' семье', 1, true)
         or lowered:find(' семейн', 1, true)
+        or lowered:find(' начал исполнять контракт', 1, true)
+        or lowered:find(' выполнил контракт', 1, true)
 
-    if not explicitFamily then
-        if prefix == '' or prefix:find('[', 1, true) or prefix:find(']', 1, true) then return false end
-        if not suffix:match('^%s*:') then return false end
-    end
+    -- Системные сообщения семьи могут не содержать ник в формате Nick_Name.
+    if explicitFamily then return true end
 
-    detectedFamilyTags[tag] = true
-    return true
+    -- Семейный ранг и отображаемое имя могут называться как угодно и не обязаны
+    -- содержать подчёркивание. До двоеточия должны находиться минимум два слова.
+    local speaker = trim(remainder:match('^([^:]+):') or '')
+    if speaker == '' or speaker:find('[', 1, true) or speaker:find(']', 1, true) then return false end
+    return speaker:match('^%S+%s+%S+') ~= nil
 end
 
 function handleServerMessageEvent(color, text)
@@ -8112,10 +8106,7 @@ function drawSettings()
         if imgui.Checkbox(u8'Скрывать канал [G]', hideGChannel) then saveConfig() end
         if imgui.Checkbox(u8'Скрывать канал [P]', hidePChannel) then saveConfig() end
         if imgui.Checkbox(u8'Скрывать государственные новости', hideGovNews) then saveConfig() end
-        if imgui.Checkbox(u8'Скрывать любые сообщения семьи', hideFamilyChat) then
-            detectedFamilyTags = {}
-            saveConfig()
-        end
+        if imgui.Checkbox(u8'Скрывать любые сообщения семьи', hideFamilyChat) then saveConfig() end
         section('Автоматические действия')
         if imgui.Checkbox(u8'Автоматически отправлять /eat при получении подноса', autoEat) then saveConfig() end
         imgui.TextWrapped(u8'Команда отправляется через 1000 мс после серверной подсказки.')
