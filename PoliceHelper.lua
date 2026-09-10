@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | —оздано с любовью от Ravenhush Ashbluff <3'
 -- ¬ерси€ состоит из даты и времени публикации: ƒƒћћ√√√√_„„ћћ——.
 -- ‘ормат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '10092026_173407'
+LOCAL_VERSION = '10092026_175429'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Ќазвани€ автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -934,7 +934,7 @@ roleplayOverrides = parseEditorEntries(config.main.roleplayOverrides, 'body')
 actionHotkeys = parseActionHotkeys(config.main.actionHotkeys)
 
 roleplayCatalog = {
-    { name = 'cuff', title = '/cuff, /cf Ц надеть наручники', body = '/me удержива€ руки подозреваемого за спиной, сн€л наручники с по€сного держател€.\n/me зафиксировал наручники на зап€сть€х задержанного' },
+    { name = 'cuff', title = '/cuff, /cf Ц надеть наручники', body = '/me сн€л наручники с по€сного держател€ и раскрыл фиксирующий механизм\n/me зафиксировал наручники на зап€сть€х задержанного' },
     { name = 'uncuff', title = '/uncuff Ц сн€ть наручники', body = '/me достал ключ и открыл фиксирующий механизм наручников.\n/me сн€л наручники с рук задержанного и закрепил их на по€се' },
     { name = 'hold', title = '/hold, /hd Ц сопровождать', body = '/me аккуратно вз€л задержанного под руку и повЄл за собой' },
     { name = 'putpl', title = '/putpl, /pl Ц посадить в машину', body = '/me открыл заднюю пассажирскую дверь патрульного автомобил€.\n/me придержива€ задержанного, помог ему сесть на заднее сиденье\n/me закрыл дверь патрульного автомобил€' },
@@ -5284,7 +5284,7 @@ local function commandCuff(args)
     cuffRpPendingActor = getLocalName()
     cuffRpPendingUntil = os.clock() + 15.0
     runSequence('Ќаручники', {
-        '/me удержива€ руки подозреваемого за спиной, сн€л наручники с по€сного держател€.',
+        '/me сн€л наручники с по€сного держател€ и раскрыл фиксирующий механизм',
         '/cuff {id}'
     }, { targetId = id })
 end
