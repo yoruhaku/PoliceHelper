@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '10092026_024510'
+LOCAL_VERSION = '10092026_041313'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -934,7 +934,7 @@ roleplayCatalog = {
     { name = 'search', title = '/search, /se – обыскать', body = '/me надел одноразовые перчатки и подготовился к проведению обыска\n/me последовательно проверил одежду и личные вещи задержанного, соблюдая меры безопасности' },
     { name = 'arrest', title = '/arrest – передать в участок', body = '/do Задержанный доставлен к месту оформления ареста.\n/me заполнил данные задержанного и передал материалы дежурному сотруднику.' },
     { name = 'clear', title = '/clear – снять розыск', body = '/me открыл базу МВД и выбрал нужную запись\n/me указал причину аннулирования записи: {cmd_reason}.' },
-    { name = 'su', title = '/su, /sus – выдать розыск', body = '/me снял рацию с поясного держателя, после чего сообщил диспетчеру приметы подозреваемого\n/me закрепил рацию обратно на поясной держатель' },
+    { name = 'su', title = '/su, /sus – выдать розыск', body = '/me внёс данные подозреваемого в базу розыска' },
     { name = 'ticket', title = '/ticket, /tick – выписать штраф', body = '/me достал бланк штрафной квитанции и ручку.\n/me заполнил сведения о нарушителе, сумму и основание штрафа.\n/do В квитанции указаны сумма {cmd_amount}$ и причина: {cmd_reason}.' },
     { name = 'takelic', title = '/takelic – изъять лицензию', body = '/me открыл базу МВД и ввёл номер водительского удостоверения нарушителя\n/me указал причину аннулирования водительских прав: {cmd_reason}' },
     { name = 'skip', title = '/skip – выдать пропуск', body = '/me достал чистый бланк пропуска в здания МВД и ручку\n/me заполнил пропуск и передал его владельцу' },
@@ -1743,6 +1743,9 @@ function handleServerMessageEvent(color, text)
         and os.clock() <= pendingWantedExpiresAt
         and wantedNickname == pendingWantedTargetNickname
     then
+        sampSendChat(configuredRoleplayLine(
+            'su', 1, '/me внёс данные подозреваемого в базу розыска'
+        ))
         pendingWantedTargetId = -1
         pendingWantedTargetNickname = ''
         pendingWantedExpiresAt = 0.0
@@ -5475,10 +5478,6 @@ local function commandSu(args)
         notify('Использование: /su [ID] [1-6] [причина]')
         return
     end
-    if sequenceBusy then
-        notify('Сначала дождитесь завершения действия: ' .. sequenceName .. '.')
-        return
-    end
     local validId, nickname, err = getPlayerById(id)
     if not validId then notify(err); return end
     pendingWantedTargetId = validId
@@ -5486,11 +5485,7 @@ local function commandSu(args)
     pendingWantedExpiresAt = os.clock() + 15.0
     pendingWantedReason = trim(reason)
     pendingWantedRetryUsed = false
-    runSequence('Выдача розыска', {
-        '/me снял рацию с поясного держателя, после чего сообщил диспетчеру приметы подозреваемого',
-        '/su {id} {cmd_stars} {cmd_reason}',
-        '/me закрепил рацию обратно на поясной держатель'
-    }, { targetId = validId, tokens = { ['{cmd_stars}'] = stars, ['{cmd_reason}'] = trim(reason) } })
+    sampSendChat('/su ' .. validId .. ' ' .. stars .. ' ' .. trim(reason))
 end
 
 function commandQuickDisobedience(args)
@@ -7078,11 +7073,15 @@ function drawDetention()
     if wantedLevel[0] < 1 then wantedLevel[0] = 1 end
     if wantedLevel[0] > 6 then wantedLevel[0] = 6 end
     if wideButton('Объявить в розыск', 210) then
-        runSequence('Объявление в розыск', {
-            '/me снял рацию с поясного держателя, после чего сообщил диспетчеру приметы подозреваемого',
-            '/su {id} {stars} {reason}',
-            '/me закрепил рацию обратно на поясной держатель'
-        }, { target = true, reason = true })
+        local id, _, err = getTarget()
+        local reason = trim(fromBuffer(reasonBuf))
+        if not id then
+            notify(err or 'Сначала выберите игрока.')
+        elseif reason == '' then
+            notify('Укажите причину или статью розыска.')
+        else
+            commandSu(id .. ' ' .. wantedLevel[0] .. ' ' .. reason)
+        end
     end
 
     imgui.NextColumn()
