@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '10092026_053021'
+LOCAL_VERSION = '10092026_173407'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -750,6 +750,12 @@ putplRpPendingActor = ''
 putplRpPendingUntil = 0.0
 putplRpClosePending = false
 putplRpCloseAt = 0.0
+pullRpPendingId = -1
+pullRpPendingNickname = ''
+pullRpPendingActor = ''
+pullRpPendingUntil = 0.0
+pullRpPendingFirst = ''
+pullRpPendingSecond = ''
 trackedMapId = -1
 trackedNameTextdrawId = -1
 trackedPointTextdrawId = -1
@@ -1654,6 +1660,43 @@ function handleServerMessageEvent(color, text)
                 sampSendChat(configuredRoleplayLine('putpl', 2, '/me придерживая задержанного, помог ему сесть на заднее сиденье'))
                 putplRpClosePending = true
                 putplRpCloseAt = os.clock() + math.max(0, delayMs[0]) / 1000.0
+            end
+        end
+    end
+
+    if pullRpPendingId >= 0 then
+        if os.clock() > pullRpPendingUntil then
+            pullRpPendingId = -1
+            pullRpPendingNickname = ''
+            pullRpPendingActor = ''
+            pullRpPendingUntil = 0.0
+            pullRpPendingFirst = ''
+            pullRpPendingSecond = ''
+        else
+            local ownActionText = confirmationText:gsub('_', ' ')
+            local actorConfirmed = pullRpPendingActor ~= ''
+                and (ownActionText:find(pullRpPendingActor .. ' вытащил ', 1, true)
+                    or ownActionText:find(pullRpPendingActor .. ' вытащила ', 1, true))
+            local targetConfirmed = pullRpPendingNickname ~= ''
+                and ownActionText:find(' ' .. pullRpPendingNickname .. ' из транспорта', 1, true)
+            if actorConfirmed and targetConfirmed then
+                local firstLine = pullRpPendingFirst
+                local secondLine = pullRpPendingSecond
+                pullRpPendingId = -1
+                pullRpPendingNickname = ''
+                pullRpPendingActor = ''
+                pullRpPendingUntil = 0.0
+                pullRpPendingFirst = ''
+                pullRpPendingSecond = ''
+                sampSendChat(configuredRoleplayLine('pull', 1, firstLine))
+                if secondLine ~= '' then
+                    lua_thread.create(function()
+                        wait(math.max(0, delayMs[0]))
+                        if isSampAvailable() then
+                            sampSendChat(configuredRoleplayLine('pull', 2, secondLine))
+                        end
+                    end)
+                end
             end
         end
     end
@@ -5308,40 +5351,33 @@ end
 local function commandPull(args)
     local id = parseIdOnly(args, '/pull [ID]')
     if not id then return end
+    local validId, nickname, err = getPlayerById(id)
+    if not validId then notify(err); return end
     local kind = getPullVehicleKind(id)
-    local lines
+    local firstLine, secondLine
     if kind == 'bicycle' then
-        lines = {
-            '/me подошёл к велосипеду и взял задержанного под руку',
-            '/pull {id}',
-            '/me помог задержанному безопасно сойти с велосипеда'
-        }
+        firstLine = '/me подошёл к велосипеду и взял человека под руку'
+        secondLine = '/me помог человеку безопасно сойти с велосипеда'
     elseif kind == 'motorcycle' then
-        lines = {
-            '/me подошёл к мотоциклу и взял задержанного под руку',
-            '/pull {id}',
-            '/me помог задержанному безопасно сойти с мотоцикла'
-        }
+        firstLine = '/me подошёл к мотоциклу и взял человека под руку'
+        secondLine = '/me помог человеку безопасно сойти с мотоцикла'
     elseif kind == 'bus' then
-        lines = {
-            '/me открыл дверь автобуса и взял задержанного под руку',
-            '/pull {id}',
-            '/me помог задержанному выйти из автобуса'
-        }
+        firstLine = '/me открыл дверь автобуса и взял человека под руку'
+        secondLine = '/me помог человеку выйти из автобуса'
     elseif kind == 'car' then
-        lines = {
-            '/me открыл дверь автомобиля и взял задержанного под руку',
-            '/pull {id}',
-            '/me помог задержанному выйти из автомобиля'
-        }
+        firstLine = '/me открыл дверь автомобиля и взял человека под руку'
+        secondLine = '/me помог человеку выйти из автомобиля'
     else
-        lines = {
-            '/me подошёл к транспортному средству и взял задержанного под руку',
-            '/pull {id}',
-            '/me помог задержанному покинуть транспортное средство'
-        }
+        firstLine = '/me подошёл к транспортному средству и взял человека под руку'
+        secondLine = '/me помог человеку покинуть транспортное средство'
     end
-    runSequence('Высадка из транспорта', lines, { targetId = id })
+    pullRpPendingId = validId
+    pullRpPendingNickname = nickname
+    pullRpPendingActor = getLocalName()
+    pullRpPendingUntil = os.clock() + 15.0
+    pullRpPendingFirst = firstLine
+    pullRpPendingSecond = secondLine
+    sampSendChat('/pull ' .. validId)
 end
 
 local function commandSearch(args)
@@ -6659,6 +6695,13 @@ end
 
 function mainHotkeyName()
     return keyPairName(mainKey1, mainKey2, mainUseSecond)
+end
+
+function hotkeyUsesPromptChoice(first, second, useSecond)
+    first = tonumber(first) or 0
+    second = tonumber(second) or 0
+    return first == vkeys.VK_Y or first == vkeys.VK_N
+        or (useSecond and (second == vkeys.VK_Y or second == vkeys.VK_N))
 end
 
 function ensureActionHotkey(id)
@@ -8923,6 +8966,14 @@ function main()
             pendingWantedRoleplayFallback = '/me внёс данные подозреваемого в базу розыска'
             pendingWantedExpiresAt = 0.0
         end
+        if pullRpPendingId >= 0 and runtimeNow > pullRpPendingUntil then
+            pullRpPendingId = -1
+            pullRpPendingNickname = ''
+            pullRpPendingActor = ''
+            pullRpPendingUntil = 0.0
+            pullRpPendingFirst = ''
+            pullRpPendingSecond = ''
+        end
         if sharedTrackingOfferId >= 0 and runtimeNow > sharedTrackingOfferUntil then
             sharedTrackingOfferId = -1
             sharedTrackingOfferName = ''
@@ -8973,6 +9024,7 @@ function main()
         local incomingCallActive = runtimeNow <= incomingCallUntil
         local sharedTrackingOfferActive = sharedTrackingOfferId >= 0
             and runtimeNow <= sharedTrackingOfferUntil
+        local promptChoiceActive = incomingCallActive or sharedTrackingOfferActive
         if actionHotkeysAllowed then
             if incomingCallActive then
                 if wasKeyPressed(vkeys.VK_Y) then
@@ -9008,7 +9060,6 @@ function main()
                 end
             end
         end
-        if incomingCallActive or sharedTrackingOfferActive then actionHotkeysAllowed = false end
         for pageId, items in pairs(quickActionPages) do
             if pageId ~= 'main' then
                 for _, item in ipairs(items) do
@@ -9017,7 +9068,9 @@ function main()
                     local secondDown = not binding.useSecond
                         or (binding.key2 > 0 and isKeyDown(binding.key2))
                     local isDown = firstDown and secondDown
-                    if actionHotkeysAllowed and isDown and not binding.wasDown
+                    local choiceConflict = promptChoiceActive
+                        and hotkeyUsesPromptChoice(binding.key1, binding.key2, binding.useSecond)
+                    if actionHotkeysAllowed and not choiceConflict and isDown and not binding.wasDown
                         and not findActionHotkeyConflict(item.id)
                     then
                         safeRuntimeCall('горячего действия ' .. item.id, item.action)
@@ -9033,6 +9086,9 @@ function main()
             or (strobeKey2[0] > 0 and isKeyDown(strobeKey2[0]))
         local strobeHotkeyDown = strobePrimaryDown and strobeSecondDown
         if actionHotkeysAllowed and strobesEnabled[0]
+            and not (promptChoiceActive and hotkeyUsesPromptChoice(
+                strobeKey1[0], strobeKey2[0], strobeUseSecond[0]
+            ))
             and strobeHotkeyDown and not strobeHotkeyWasDown
         then
             toggleStrobes()
@@ -9051,6 +9107,9 @@ function main()
             or (cruiseKey2[0] > 0 and isKeyDown(cruiseKey2[0]))
         local cruiseHotkeyDown = cruisePrimaryDown and cruiseSecondDown
         if actionHotkeysAllowed and cruiseEnabled[0]
+            and not (promptChoiceActive and hotkeyUsesPromptChoice(
+                cruiseKey1[0], cruiseKey2[0], cruiseUseSecond[0]
+            ))
             and cruiseHotkeyDown and not cruiseHotkeyWasDown
         then
             toggleCruiseControl()
@@ -9088,6 +9147,9 @@ function main()
         local mainHotkeyDown = mainPrimaryDown and mainSecondDown
         if mainHotkeyDown and not mainHotkeyWasDown
             and os.clock() >= hotkeyCaptureBlockUntil
+            and not (promptChoiceActive and hotkeyUsesPromptChoice(
+                mainKey1[0], mainKey2[0], mainUseSecond[0]
+            ))
             and not quickMenu[0]
             and not sosConfirm[0]
             and not updateConfirm[0]
@@ -9106,6 +9168,9 @@ function main()
         local quickHotkeyDown = primaryDown and secondDown
         if quickHotkeyDown and not quickHotkeyWasDown
             and os.clock() >= hotkeyCaptureBlockUntil
+            and not (promptChoiceActive and hotkeyUsesPromptChoice(
+                quickKey1[0], quickKey2[0], quickUseSecond[0]
+            ))
             and not quickMenuBlocked
             and not window[0]
             and not wantedSelector[0]
