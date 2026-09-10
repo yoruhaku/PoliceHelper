@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '10092026_041313'
+LOCAL_VERSION = '10092026_041845'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -730,6 +730,8 @@ pendingWantedTargetNickname = ''
 pendingWantedExpiresAt = 0.0
 pendingWantedReason = ''
 pendingWantedRetryUsed = false
+pendingWantedRoleplayKey = 'su'
+pendingWantedRoleplayFallback = '/me внёс данные подозреваемого в базу розыска'
 cuffRpPendingId = -1
 cuffRpPendingNickname = ''
 cuffRpPendingActor = ''
@@ -935,6 +937,7 @@ roleplayCatalog = {
     { name = 'arrest', title = '/arrest – передать в участок', body = '/do Задержанный доставлен к месту оформления ареста.\n/me заполнил данные задержанного и передал материалы дежурному сотруднику.' },
     { name = 'clear', title = '/clear – снять розыск', body = '/me открыл базу МВД и выбрал нужную запись\n/me указал причину аннулирования записи: {cmd_reason}.' },
     { name = 'su', title = '/su, /sus – выдать розыск', body = '/me внёс данные подозреваемого в базу розыска' },
+    { name = 'gpson', title = '/gpson – активировать GPS-трекер', body = '/me нажал кнопку на часах и активировал GPS-трекер' },
     { name = 'ticket', title = '/ticket, /tick – выписать штраф', body = '/me достал бланк штрафной квитанции и ручку.\n/me заполнил сведения о нарушителе, сумму и основание штрафа.\n/do В квитанции указаны сумма {cmd_amount}$ и причина: {cmd_reason}.' },
     { name = 'takelic', title = '/takelic – изъять лицензию', body = '/me открыл базу МВД и ввёл номер водительского удостоверения нарушителя\n/me указал причину аннулирования водительских прав: {cmd_reason}' },
     { name = 'skip', title = '/skip – выдать пропуск', body = '/me достал чистый бланк пропуска в здания МВД и ручку\n/me заполнил пропуск и передал его владельцу' },
@@ -1741,16 +1744,18 @@ function handleServerMessageEvent(color, text)
     local wantedNickname = clean:match('^Вы объявили ([%w_]+) в розыск%.')
     if wantedNickname and pendingWantedTargetId >= 0
         and os.clock() <= pendingWantedExpiresAt
-        and wantedNickname == pendingWantedTargetNickname
+        and (pendingWantedTargetNickname == '' or wantedNickname == pendingWantedTargetNickname)
     then
         sampSendChat(configuredRoleplayLine(
-            'su', 1, '/me внёс данные подозреваемого в базу розыска'
+            pendingWantedRoleplayKey, 1, pendingWantedRoleplayFallback
         ))
         pendingWantedTargetId = -1
         pendingWantedTargetNickname = ''
         pendingWantedExpiresAt = 0.0
         pendingWantedReason = ''
         pendingWantedRetryUsed = false
+        pendingWantedRoleplayKey = 'su'
+        pendingWantedRoleplayFallback = '/me внёс данные подозреваемого в базу розыска'
     end
 
     local currentWanted, allowedIncrease = clean:match(
@@ -5379,11 +5384,17 @@ end
 function commandGpsTracker()
     local ok, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
     if not ok then notify('Не удалось определить собственный ID.'); return end
-    runSequence('GPS-трекер', {
-        '/do В часах сотрудника находится GPS-трекер.',
-        '/me голосовой командой активировал GPS-трекер',
-        '/su ' .. id .. ' 3 GPS-трекер'
-    })
+    local nickname = ''
+    local nicknameOk, value = pcall(sampGetPlayerNickname, id)
+    if nicknameOk and type(value) == 'string' then nickname = value end
+    pendingWantedTargetId = id
+    pendingWantedTargetNickname = nickname
+    pendingWantedExpiresAt = os.clock() + 15.0
+    pendingWantedReason = 'GPS-трекер'
+    pendingWantedRetryUsed = false
+    pendingWantedRoleplayKey = 'gpson'
+    pendingWantedRoleplayFallback = '/me нажал кнопку на часах и активировал GPS-трекер'
+    sampSendChat('/su ' .. id .. ' 3 GPS-трекер')
 end
 
 function commandGpsTrackerClear()
@@ -5485,6 +5496,8 @@ local function commandSu(args)
     pendingWantedExpiresAt = os.clock() + 15.0
     pendingWantedReason = trim(reason)
     pendingWantedRetryUsed = false
+    pendingWantedRoleplayKey = 'su'
+    pendingWantedRoleplayFallback = '/me внёс данные подозреваемого в базу розыска'
     sampSendChat('/su ' .. validId .. ' ' .. stars .. ' ' .. trim(reason))
 end
 
@@ -8907,6 +8920,8 @@ function main()
             pendingWantedTargetNickname = ''
             pendingWantedReason = ''
             pendingWantedRetryUsed = false
+            pendingWantedRoleplayKey = 'su'
+            pendingWantedRoleplayFallback = '/me внёс данные подозреваемого в базу розыска'
             pendingWantedExpiresAt = 0.0
         end
         if sharedTrackingOfferId >= 0 and runtimeNow > sharedTrackingOfferUntil then
