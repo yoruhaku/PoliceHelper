@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '10092026_041845'
+LOCAL_VERSION = '10092026_053021'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -1741,10 +1741,9 @@ function handleServerMessageEvent(color, text)
         sharedTrackingSwitchUntil = 0.0
     end
 
-    local wantedNickname = clean:match('^Вы объявили ([%w_]+) в розыск%.')
-    if wantedNickname and pendingWantedTargetId >= 0
+    local wantedConfirmed = confirmationText:match('^Вы объявили .+ в розыск%.') ~= nil
+    if wantedConfirmed and pendingWantedTargetId >= 0
         and os.clock() <= pendingWantedExpiresAt
-        and (pendingWantedTargetNickname == '' or wantedNickname == pendingWantedTargetNickname)
     then
         sampSendChat(configuredRoleplayLine(
             pendingWantedRoleplayKey, 1, pendingWantedRoleplayFallback
