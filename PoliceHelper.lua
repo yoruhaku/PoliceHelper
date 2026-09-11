@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '10092026_175429'
+LOCAL_VERSION = '11092026_170831'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -1968,7 +1968,6 @@ local function handleAutoEquipment(dialogId, style, button1, text)
     if cleanButton ~= 'Взять'
         or not cleanText:find('Оружие', 1, true)
         or not cleanText:find('Кол%-во')
-        or not cleanText:find('Ограничения', 1, true)
     then
         return
     end
@@ -5743,6 +5742,7 @@ local helperCommandSections = {
     {
         title = 'Сокращённые команды',
         rows = {
+            {'/sp текст или команда', 'Отправить всё после /sp напрямую, без RP-обработчика PoliceHelper', '/sp /cuff 15'},
             {'/cf ID', 'Короткая версия /cuff с полной RP-логикой', '/cf 15'},
             {'/hd ID', 'Короткая версия /hold с полной RP-логикой', '/hd 15'},
             {'/pl ID', 'Короткая версия /putpl с полной RP-логикой', '/pl 15'},
@@ -6011,6 +6011,15 @@ local function commandHistory(args)
     local ok, nickname = pcall(sampGetPlayerNickname, id)
     if not ok or not nickname or nickname == '' then notify('Не удалось получить ник игрока.'); return end
     sampSendChat('/history ' .. nickname)
+end
+
+function commandServerPass(args)
+    args = trim(tostring(args or ''))
+    if args == '' then
+        notify('Используйте: /sp /команда [аргументы]')
+        return
+    end
+    sampSendChat(args)
 end
 
 local function commandDetentionMode(args)
@@ -7824,7 +7833,8 @@ end
 editorCommandGroups = {
     { title = 'Основное и профиль', items = {
         {'ph', '', 'Открыть главное окно'}, {'phsync', '', 'Обновить профиль через /st'},
-        {'nanim', '[1-8]', 'Открыть список или запустить анимацию по номеру'}, {'bc', '', 'Включить или выключить боди-камеру'}
+        {'nanim', '[1-8]', 'Открыть список или запустить анимацию по номеру'}, {'bc', '', 'Включить или выключить боди-камеру'},
+        {'sp', 'текст или /команда [аргументы]', 'Отправить напрямую без RP-обработчика PoliceHelper'}
     }},
     { title = 'Сокращённые команды', items = {
         {'cf', 'ID', 'Короткая версия /cuff'}, {'hd', 'ID', 'Короткая версия /hold'},
@@ -8794,6 +8804,7 @@ function main()
 
     registerSafeCommand('ph', toggleWindow)
     registerSafeCommand('phsync', requestStatsNow)
+    registerSafeCommand('sp', commandServerPass)
     registerSafeCommand('hr', commandInterview)
     registerSafeCommand('nanim', commandAnimations)
     registerSafeCommand('udo', commandUdo)
@@ -8885,6 +8896,7 @@ function main()
 
     editorBuiltInHandlers = {
         ph = function() toggleWindow() end, phsync = function() requestStatsNow() end,
+        sp = commandServerPass,
         hr = commandInterview,
         nanim = commandAnimations, udo = commandUdo, prava = commandRights,
         cuff = commandCuff, cf = commandCuff, uncuff = commandUncuff,
