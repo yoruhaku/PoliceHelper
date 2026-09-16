@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '17092026_001115'
+LOCAL_VERSION = '17092026_002950'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -5322,6 +5322,22 @@ local function commandUncuff(args)
     }, { targetId = id })
 end
 
+function commandUncf(args)
+    local id = parseIdOnly(args, '/uncf [ID]')
+    if not id then return end
+    -- Эта команда не должна запускать отложенные RP-строки обычных /uncuff и /cuff.
+    uncuffRpPending = false
+    uncuffRpPendingActor = ''
+    uncuffRpPendingUntil = 0.0
+    cuffRpPendingId = -1
+    cuffRpPendingNickname = ''
+    cuffRpPendingActor = ''
+    cuffRpPendingUntil = 0.0
+    sampSendChat('/uncuff ' .. id)
+    sampSendChat('/cuff ' .. id)
+    sampSendChat('/n Откат снятия наручников <3')
+end
+
 local function commandHold(args)
     if sequenceBusy then
         notify('Сначала дождитесь завершения действия: ' .. sequenceName .. '.')
@@ -5768,6 +5784,7 @@ local helperCommandSections = {
         rows = {
             {'/sp текст или команда', 'Отправить всё после /sp напрямую, без RP-обработчика PoliceHelper', '/sp /cuff 15'},
             {'/cf ID', 'Короткая версия /cuff с полной RP-логикой', '/cf 15'},
+            {'/uncf ID', 'Мгновенно: /uncuff, /cuff и OOC-откат без RP-отыгровок', '/uncf 15'},
             {'/hd ID', 'Короткая версия /hold с полной RP-логикой', '/hd 15'},
             {'/pl ID', 'Короткая версия /putpl с полной RP-логикой', '/pl 15'},
             {'/se ID основание', 'Короткая версия /search с полной RP-логикой', '/se 15 Обыск при задержании'},
@@ -7098,112 +7115,6 @@ function drawCheck()
     imgui.Columns(1)
 end
 
-function drawDetention()
-    inputLine('Причина / статья', reasonBuf)
-    imgui.Spacing()
-    imgui.Columns(3, 'detentionColumns', false)
-
-    section('Фиксация')
-    if wideButton('Надеть наручники', 210) then
-        local id, _, err = getTarget()
-        if id then commandCuff(tostring(id)) else notify(err or 'Сначала выберите игрока.') end
-    end
-    if wideButton('Снять наручники', 210) then
-        local id, _, err = getTarget()
-        if id then commandUncuff(tostring(id)) else notify(err or 'Сначала выберите игрока.') end
-    end
-    if wideButton('Сопровождать', 210) then
-        local id, _, err = getTarget()
-        if id then commandHold(tostring(id)) else notify(err or 'Сначала выберите игрока.') end
-    end
-
-    section('Обыск')
-    inputLine('Основание', noteBuf)
-    if wideButton('Провести обыск', 210) then
-        local basis = trim(fromBuffer(noteBuf))
-        if basis == '' then
-            notify('Укажите основание для обыска.')
-        else
-            runSequence('Обыск', {
-                '/me надел одноразовые перчатки и подготовился к проведению обыска',
-                '/me последовательно проверил одежду и личные вещи задержанного, соблюдая меры безопасности',
-                '/search {id} {search_basis}'
-            }, { target = true, tokens = { ['{search_basis}'] = basis } })
-        end
-    end
-
-    imgui.NextColumn()
-    section('Транспортировка')
-    if wideButton('Посадить в крузер', 210) then
-        local id, _, err = getTarget()
-        if id then commandPutpl(tostring(id)) else notify(err or 'Сначала выберите игрока.') end
-    end
-    if wideButton('Вытащить из транспорта', 210) then
-        local id, _, err = getTarget()
-        if id then commandPull(tostring(id)) else notify(err or 'Сначала выберите игрока.') end
-    end
-    if wideButton('Зачитать права', 210) then
-        runSequence('Права задержанного', {
-            'Вы имеете право хранить молчание.',
-            'Всё сказанное вами может быть использовано против вас в суде.',
-            'Вы имеете право на адвоката и один телефонный звонок.',
-            'Если вы не можете оплатить услуги адвоката, он будет предоставлен государством.',
-            'Вам понятны ваши права?'
-        })
-    end
-
-    section('Розыск')
-    imgui.AlignTextToFramePadding()
-    imgui.Text(u8'Степень')
-    imgui.SameLine()
-    imgui.SetNextItemWidth(100)
-    imgui.InputInt('##wantedLevel', wantedLevel, 1, 1)
-    if wantedLevel[0] < 1 then wantedLevel[0] = 1 end
-    if wantedLevel[0] > 6 then wantedLevel[0] = 6 end
-    if wideButton('Объявить в розыск', 210) then
-        local id, _, err = getTarget()
-        local reason = trim(fromBuffer(reasonBuf))
-        if not id then
-            notify(err or 'Сначала выберите игрока.')
-        elseif reason == '' then
-            notify('Укажите причину или статью розыска.')
-        else
-            commandSu(id .. ' ' .. wantedLevel[0] .. ' ' .. reason)
-        end
-    end
-
-    imgui.NextColumn()
-    section('Завершение')
-    if wideButton('Системный арест', 210) then
-        local lines = {
-            '/do Задержанный доставлен к месту оформления ареста.',
-            '/me заполнил данные задержанного и передал материалы дежурному сотруднику.',
-            '/arrest {id} {reason}'
-        }
-        appendAutomaticRadioReport(lines, '10-15, задержанный арестован. 10-20: {location}. CODE-4.')
-        runSequence('Арест', lines, { target = true, reason = true })
-    end
-    if wideButton('Передать в ИВС', 210) then
-        local lines = {
-            '/me передал задержанного дежурному сотруднику изолятора временного содержания.',
-            '/clear {id} Передан в ИВС'
-        }
-        appendAutomaticRadioReport(lines, 'Задержанный передан в ИВС. CODE-4, доступен.')
-        runSequence('Передача в ИВС', lines, { target = true })
-    end
-    if wideButton('Снять ошибочный розыск', 210) then
-        runSequence('Снятие розыска', {
-            '/me открыл раздел разыскиваемых в базе МВД и выбрал нужную запись',
-            '/me указал причину аннулирования записи: {reason}.',
-            '/clear {id} {reason}'
-        }, { target = true, reason = true })
-    end
-
-    section('Важно')
-    imgui.TextWrapped(u8'Не применяйте команды к AFK-игрокам, в воде или без физического доступа. Перед каждым процессуальным действием нужна видеозапись. Скрипт не проверяет законность основания – ответственность остаётся на сотруднике.')
-    imgui.Columns(1)
-end
-
 function drawRadio()
     imgui.Columns(2, 'radioColumns', false)
     section('Шаблон доклада')
@@ -7863,7 +7774,8 @@ editorCommandGroups = {
         {'sp', 'текст или /команда [аргументы]', 'Отправить напрямую без RP-обработчика PoliceHelper'}
     }},
     { title = 'Сокращённые команды', items = {
-        {'cf', 'ID', 'Короткая версия /cuff'}, {'hd', 'ID', 'Короткая версия /hold'},
+        {'cf', 'ID', 'Короткая версия /cuff'}, {'uncf', 'ID', 'Снять и снова надеть наручники с OOC-откатом'},
+        {'hd', 'ID', 'Короткая версия /hold'},
         {'pl', 'ID', 'Короткая версия /putpl'}, {'se', 'ID основание', 'Короткая версия /search'},
         {'wd', '[1 или 2]', 'Короткая версия /wanted'}, {'sm', 'ID', 'Короткая версия /setmark'}
     }},
@@ -8245,7 +8157,7 @@ function drawSettings()
         if imgui.Checkbox(u8'Отправлять /reset после успешного надевания маски', resetAfterMask) then saveConfig() end
         section('Автоматические доклады в /r')
         if imgui.Checkbox(u8'Отправлять доклады вместе с действиями', autoRadioReports) then saveConfig() end
-        imgui.TextWrapped(u8'По умолчанию выключено. Влияет на /arrest, /m55, /m66, передачу в ИВС и /sos. Ручные команды рации работают всегда; сообщения /f при SOS не отключаются.')
+        imgui.TextWrapped(u8'По умолчанию выключено. Влияет на /arrest, /m55, /m66 и /sos. Ручные команды рации работают всегда; сообщения /f при SOS не отключаются.')
 
     elseif settingsPage == 3 then
         section('Автовзятие со склада')
@@ -8842,6 +8754,7 @@ function main()
     registerSafeCommand('cuff', commandCuff)
     registerSafeCommand('cf', commandCuff)
     registerSafeCommand('uncuff', commandUncuff)
+    registerSafeCommand('uncf', commandUncf)
     registerSafeCommand('hold', commandHold)
     registerSafeCommand('hd', commandHold)
     registerSafeCommand('search', commandSearch)
@@ -8929,7 +8842,7 @@ function main()
         sp = commandServerPass,
         hr = commandInterview,
         nanim = commandAnimations, udo = commandUdo, prava = commandRights,
-        cuff = commandCuff, cf = commandCuff, uncuff = commandUncuff,
+        cuff = commandCuff, cf = commandCuff, uncuff = commandUncuff, uncf = commandUncf,
         hold = commandHold, hd = commandHold,
         search = commandSearch, se = commandSearch,
         putpl = commandPutpl, pl = commandPutpl, pull = commandPull,
