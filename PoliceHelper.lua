@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '16092026_135027'
+LOCAL_VERSION = '17092026_001115'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -508,6 +508,7 @@ local defaults = {
         autoFuel = false,
         autoReportDamager = false,
         autoReportTracked = false,
+        autoRadioReports = false,
         commandAliases = '',
         customCommands = '',
         actionHotkeys = '',
@@ -604,6 +605,7 @@ autoEat = new.bool(config.main.autoEat == true)
 autoFuel = new.bool(config.main.autoFuel == true)
 autoReportDamager = new.bool(config.main.autoReportDamager == true)
 autoReportTracked = new.bool(config.main.autoReportTracked == true)
+autoRadioReports = new.bool(config.main.autoRadioReports == true)
 autoEquipment = new.bool(config.main.autoEquipment == true)
 weaponRoleplay = new.bool(config.main.weaponRoleplay == true)
 whiteMaskedChatIds = new.bool(config.main.whiteMaskedChatIds == true)
@@ -1169,6 +1171,7 @@ local function saveConfig()
     config.main.autoFuel = autoFuel[0]
     config.main.autoReportDamager = autoReportDamager[0]
     config.main.autoReportTracked = autoReportTracked[0]
+    config.main.autoRadioReports = autoRadioReports[0]
     config.main.commandAliases = serializeEditorEntries(commandAliases, 'target')
     config.main.customCommands = serializeEditorEntries(customCommands, 'body')
     config.main.actionHotkeys = serializeActionHotkeys()
@@ -1205,7 +1208,7 @@ local function saveConfig()
     local file = io.open(CONFIG_PATH, 'wb')
     if not file then return false end
     file:write('[main]\r\n')
-    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportTracked', 'commandAliases', 'customCommands', 'roleplayOverrides', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'whiteMaskedChatIds', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'hideFamilyChat', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
+    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportTracked', 'autoRadioReports', 'commandAliases', 'customCommands', 'roleplayOverrides', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'whiteMaskedChatIds', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'hideFamilyChat', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
         local value = tostring(config.main[key]):gsub('[\r\n]', '')
         file:write(key .. '=' .. value .. '\r\n')
     end
@@ -2730,6 +2733,10 @@ end
 local function radioPrefix()
     local prefix = unitPrefix()
     return '/r ' .. (prefix ~= '' and (prefix .. ' ') or '')
+end
+
+function appendAutomaticRadioReport(lines, message)
+    if autoRadioReports[0] then lines[#lines + 1] = radioPrefix() .. message end
 end
 
 local function factionPrefix()
@@ -5410,12 +5417,13 @@ end
 local function commandArrest(args)
     local id, reason = trim(args):match('^(%d+)%s+(.+)$')
     if not id then notify('Использование: /arrest [ID] [причина]'); return end
-    runSequence('Арест', {
+    local lines = {
         '/do Задержанный доставлен к месту оформления ареста.',
         '/me заполнил данные задержанного и передал материалы дежурному сотруднику.',
-        '/arrest {id} {cmd_reason}',
-        radioPrefix() .. '10-15, задержанный арестован. CODE-4.'
-    }, { targetId = tonumber(id), tokens = { ['{cmd_reason}'] = trim(reason) } })
+        '/arrest {id} {cmd_reason}'
+    }
+    appendAutomaticRadioReport(lines, '10-15, задержанный арестован. CODE-4.')
+    runSequence('Арест', lines, { targetId = tonumber(id), tokens = { ['{cmd_reason}'] = trim(reason) } })
 end
 
 local function commandClear(args)
@@ -5506,13 +5514,14 @@ function activateSos()
     local unit = unitPrefix()
     if unit == '' then unit = 'без маркировки' end
 
-    runSequence('Тревожная кнопка', {
+    local lines = {
         '/me нажал тревожную кнопку на нагрудной радиостанции',
-        '/su ' .. id .. ' 3 SOS',
-        radioPrefix() .. 'CODE-0! SOS, нужна поддержка. 10-20: {location}.',
-        factionPrefix() .. 'CODE-0! SOS. {department}, юнит {sos_unit}.',
-        factionPrefix() .. 'Требуется поддержка. 10-20: {location}.'
-    }, { tokens = {
+        '/su ' .. id .. ' 3 SOS'
+    }
+    appendAutomaticRadioReport(lines, 'CODE-0! SOS, нужна поддержка. 10-20: {location}.')
+    lines[#lines + 1] = factionPrefix() .. 'CODE-0! SOS. {department}, юнит {sos_unit}.'
+    lines[#lines + 1] = factionPrefix() .. 'Требуется поддержка. 10-20: {location}.'
+    runSequence('Тревожная кнопка', lines, { tokens = {
         ['{sos_unit}'] = unit
     } })
 end
@@ -5643,10 +5652,10 @@ local function commandM55()
     local lines = {
         '/m Внимание! {target_driver}!',
         '/m Прижмитесь к обочине и заглушите двигатель.',
-        '/m Оставайтесь в автомобиле, держите руки на руле и ожидайте.',
-        radioPrefix() .. "{surname_self} на CONTROL. Провожу '55 в районе {location}, С'4, недоступен."
+        '/m Оставайтесь в автомобиле, держите руки на руле и ожидайте.'
     }
-    if targetVehicle then lines[#lines + 1] = radioPrefix() .. '{target_report}' end
+    appendAutomaticRadioReport(lines, "{surname_self} на CONTROL. Провожу '55 в районе {location}, С'4, недоступен.")
+    if targetVehicle then appendAutomaticRadioReport(lines, '{target_report}') end
     runSequence('Мегафон 10-55', lines, { tokens = {
         ['{target_driver}'] = driverAddress,
         ['{target_report}'] = getVehicleRadioReport(targetVehicle)
@@ -5666,10 +5675,10 @@ local function commandM66()
         '/m {target_driver}, немедленно остановитесь!',
         '/m Заглушите двигатель, выньте ключи из замка зажигания и выбросьте их в окно!',
         '/m Медленно выйдите из автомобиля с поднятыми руками!',
-        '/m Встаньте спиной к офицерам и не делайте резких движений!',
-        radioPrefix() .. "{surname_self} на CONTROL. Провожу '66 в районе {location}, С'4, недоступен."
+        '/m Встаньте спиной к офицерам и не делайте резких движений!'
     }
-    if targetVehicle then lines[#lines + 1] = radioPrefix() .. '{target_report}' end
+    appendAutomaticRadioReport(lines, "{surname_self} на CONTROL. Провожу '66 в районе {location}, С'4, недоступен.")
+    if targetVehicle then appendAutomaticRadioReport(lines, '{target_report}') end
     runSequence('Мегафон 10-66', lines, { tokens = {
         ['{target_driver}'] = driverAddress,
         ['{target_report}'] = getVehicleRadioReport(targetVehicle)
@@ -5807,8 +5816,8 @@ local helperCommandSections = {
     {
         title = 'Патруль, рация и мегафон',
         rows = {
-            {'/m55', "Начать 10-55: доклад в /r и команды мегафона", '/m55'},
-            {'/m66', "Начать 10-66: доклад в /r и команды мегафона", '/m66'},
+            {'/m55', "Начать 10-55: мегафон, доклад в /r по настройке", '/m55'},
+            {'/m66', "Начать 10-66: мегафон, доклад в /r по настройке", '/m66'},
             {'/pr', 'Потребовать прекратить преследование', '/pr'},
             {'/dk', 'Потребовать соблюдать дорожный кодекс', '/dk'},
             {'/proc', 'Потребовать не мешать процессуальным действиям', '/proc'},
@@ -6905,10 +6914,10 @@ local function drawCommands()
 end
 
 local function drawRadioGuide()
-    drawPageHeader('Рация', 'Автоматические доклады, патрульные статусы и коды подразделения')
+    drawPageHeader('Рация', 'Ручные доклады, патрульные статусы и коды подразделения')
     imgui.BeginChild('##radioGuideBody', imgui.ImVec2(0, 0), true)
-    section('Автоматизация рации')
-    imgui.TextWrapped(u8'Город, район и состав определяются в фоне и автоматически попадают в доклады. Теги /r и /f настраиваются только во вкладке «Настройки».')
+    section('Данные для докладов')
+    imgui.TextWrapped(u8'Город, район и состав определяются в фоне для отправляемых вами докладов. Автодоклады при действиях по умолчанию выключены; включить их можно в «Настройки» > «Автоматизация». Теги /r и /f задаются в профиле.')
 
     imgui.Columns(2, 'radioGuideColumns', false)
     section('Патруль и статусы')
@@ -7166,19 +7175,21 @@ function drawDetention()
     imgui.NextColumn()
     section('Завершение')
     if wideButton('Системный арест', 210) then
-        runSequence('Арест', {
+        local lines = {
             '/do Задержанный доставлен к месту оформления ареста.',
             '/me заполнил данные задержанного и передал материалы дежурному сотруднику.',
-            '/arrest {id} {reason}',
-            radioPrefix() .. '10-15, задержанный арестован. 10-20: {location}. CODE-4.'
-        }, { target = true, reason = true })
+            '/arrest {id} {reason}'
+        }
+        appendAutomaticRadioReport(lines, '10-15, задержанный арестован. 10-20: {location}. CODE-4.')
+        runSequence('Арест', lines, { target = true, reason = true })
     end
     if wideButton('Передать в ИВС', 210) then
-        runSequence('Передача в ИВС', {
+        local lines = {
             '/me передал задержанного дежурному сотруднику изолятора временного содержания.',
-            '/clear {id} Передан в ИВС',
-            radioPrefix() .. 'Задержанный передан в ИВС. CODE-4, доступен.'
-        }, { target = true })
+            '/clear {id} Передан в ИВС'
+        }
+        appendAutomaticRadioReport(lines, 'Задержанный передан в ИВС. CODE-4, доступен.')
+        runSequence('Передача в ИВС', lines, { target = true })
     end
     if wideButton('Снять ошибочный розыск', 210) then
         runSequence('Снятие розыска', {
@@ -8232,6 +8243,9 @@ function drawSettings()
         end
         imgui.TextWrapped(u8'Когда найденная через /wanted, /setmark или /sm цель окажется не дальше 100 метров, один раз отправится: /re Просьба проследить! ID: X. Общий интервал автоматических репортов – 15 секунд.')
         if imgui.Checkbox(u8'Отправлять /reset после успешного надевания маски', resetAfterMask) then saveConfig() end
+        section('Автоматические доклады в /r')
+        if imgui.Checkbox(u8'Отправлять доклады вместе с действиями', autoRadioReports) then saveConfig() end
+        imgui.TextWrapped(u8'По умолчанию выключено. Влияет на /arrest, /m55, /m66, передачу в ИВС и /sos. Ручные команды рации работают всегда; сообщения /f при SOS не отключаются.')
 
     elseif settingsPage == 3 then
         section('Автовзятие со склада')
@@ -8691,7 +8705,7 @@ function drawSosConfirm(context)
     local flags = imgui.WindowFlags.NoResize + imgui.WindowFlags.NoMove
         + imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoSavedSettings
     if imgui.Begin(u8'Тревожная кнопка', sosConfirm, flags) then
-        imgui.TextWrapped(u8'Будет выдан 3-й уровень розыска с причиной SOS, а в /r и /f уйдёт короткий срочный доклад с подразделением, юнитом и текущим местоположением.')
+        imgui.TextWrapped(u8'Будет выдан 3-й уровень розыска с причиной SOS. Доклад в /f отправится всегда, а в /r – только если включены автоматические доклады в настройках.')
         imgui.Spacing()
         if imgui.Button(u8'Активировать', imgui.ImVec2(195, 32)) then
             sosConfirm[0] = false
