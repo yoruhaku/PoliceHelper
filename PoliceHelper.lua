@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '14092026_211626'
+LOCAL_VERSION = '16092026_135027'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -511,7 +511,7 @@ local defaults = {
         commandAliases = '',
         customCommands = '',
         actionHotkeys = '',
-        actionHotkeyLayoutVersion = 6,
+        actionHotkeyLayoutVersion = 7,
         autoEquipment = false,
         weaponRoleplay = false,
         equipmentKnown = 'Щит|Дубинка|Пистолет с глушителем 9 мм|Бронежилет|Маска|Desert Eagle|MP5|M4|Дробовик|Дымовые шашки',
@@ -921,7 +921,8 @@ function applyRecommendedActionHotkeys()
         shout = { 0x4A, 0x37 }, leave_area = { 0x4A, 0x38 },
         verbal_warning = { 0x4A, 0x39 },
         radio_status = { 0x4B, 0x31 }, backup = { 0x4B, 0x32 }, sos = { 0x4B, 0x33 },
-        mask = { 0x4C, 0x31 }, healme = { 0x4C, 0x32 }, bodycam = { 0x4C, 0x33 }
+        mask = { 0x4C, 0x31 }, healme = { 0x4C, 0x32 },
+        fix = { 0x4C, 0x33 }, bodycam = { 0x4C, 0x34 }
     }
     for id, keys in pairs(recommended) do
         actionHotkeys[id] = { key1 = keys[1], key2 = keys[2], useSecond = true, wasDown = false }
@@ -1018,6 +1019,17 @@ if loadedActionHotkeyVersion < 6
     and (not actionHotkeys.verbal_warning or (tonumber(actionHotkeys.verbal_warning.key1) or 0) <= 0)
 then
     actionHotkeys.verbal_warning = { key1 = 0x4A, key2 = 0x39, useSecond = true, wasDown = false }
+end
+if loadedActionHotkeyVersion < 7 then
+    local bodycamKey = actionHotkeys.bodycam
+    if bodycamKey and bodycamKey.key1 == 0x4C and bodycamKey.key2 == 0x33
+        and bodycamKey.useSecond
+    then
+        bodycamKey.key2 = 0x34
+    end
+    if not actionHotkeys.fix then
+        actionHotkeys.fix = { key1 = 0x4C, key2 = 0x33, useSecond = true, wasDown = false }
+    end
 end
 
 local cpUpper = 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'
@@ -1160,7 +1172,7 @@ local function saveConfig()
     config.main.commandAliases = serializeEditorEntries(commandAliases, 'target')
     config.main.customCommands = serializeEditorEntries(customCommands, 'body')
     config.main.actionHotkeys = serializeActionHotkeys()
-    config.main.actionHotkeyLayoutVersion = 6
+    config.main.actionHotkeyLayoutVersion = 7
     config.main.autoEquipment = autoEquipment[0]
     config.main.weaponRoleplay = weaponRoleplay[0]
     config.main.equipmentKnown = table.concat(equipmentKnown, '|')
@@ -5248,7 +5260,7 @@ local ticketArticleGroups = groupArticles(ticketArticleList)
 
 local function shortArticleText(data)
     local text = data.text:gsub('^Статья%s+%d+%.?%d*%s*', '')
-    text = text:gsub('^' .. data.article:gsub('%.', '%%.') .. '%s*', '')
+    text = text:gsub('^' .. data.article:gsub('%.', '%%.') .. '%.?%s*', '')
     text = text:gsub('%s+[Нн]арушителю%s+присваивается.*$', '')
     text = text:gsub('%s+[Нн]арушитель%s+получает.*$', '')
     text = text:gsub('%s+на правонарушителя%s+налагается.*$', '')
@@ -8457,6 +8469,7 @@ quickActionPages = {
     equipment = {
         { id = 'mask', label = 'Маска', action = commandMask },
         { id = 'healme', label = 'Аптечка', action = commandHealme },
+        { id = 'fix', label = 'Ремкомплект', action = function() sampSendChat('/fix') end },
         { id = 'bodycam', label = 'Боди-камера', action = commandBodycam }
     },
     megaphone = {
