@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '17092026_002950'
+LOCAL_VERSION = '18092026_115821'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -504,6 +504,7 @@ local defaults = {
         profileMode = 'auto',
         hideAds = false,
         resetAfterMask = false,
+        autoMaskRenew = false,
         autoEat = false,
         autoFuel = false,
         autoReportDamager = false,
@@ -601,6 +602,7 @@ local targetId = new.int(-1)
 local delayMs = new.int(math.max(0, math.min(2000, tonumber(config.main.delay) or 1000)))
 hideAds = new.bool(config.main.hideAds == true)
 resetAfterMask = new.bool(config.main.resetAfterMask == true)
+autoMaskRenew = new.bool(config.main.autoMaskRenew == true)
 autoEat = new.bool(config.main.autoEat == true)
 autoFuel = new.bool(config.main.autoFuel == true)
 autoReportDamager = new.bool(config.main.autoReportDamager == true)
@@ -768,6 +770,7 @@ trackedWaypointY = nil
 trackedWaypointAnnounced = false
 maskRpPending = false
 maskRequestToken = 0
+lastAutoMaskRenewAt = 0
 unmaskRpPending = false
 unmaskRequestToken = 0
 healmeRpPending = false
@@ -1167,6 +1170,7 @@ local function saveConfig()
     config.main.profileMode = profileManual[0] and 'manual' or 'auto'
     config.main.hideAds = hideAds[0]
     config.main.resetAfterMask = resetAfterMask[0]
+    config.main.autoMaskRenew = autoMaskRenew[0]
     config.main.autoEat = autoEat[0]
     config.main.autoFuel = autoFuel[0]
     config.main.autoReportDamager = autoReportDamager[0]
@@ -1208,7 +1212,7 @@ local function saveConfig()
     local file = io.open(CONFIG_PATH, 'wb')
     if not file then return false end
     file:write('[main]\r\n')
-    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportTracked', 'autoRadioReports', 'commandAliases', 'customCommands', 'roleplayOverrides', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'whiteMaskedChatIds', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'hideFamilyChat', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
+    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoMaskRenew', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportTracked', 'autoRadioReports', 'commandAliases', 'customCommands', 'roleplayOverrides', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'whiteMaskedChatIds', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'hideFamilyChat', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
         local value = tostring(config.main[key]):gsub('[\r\n]', '')
         file:write(key .. '=' .. value .. '\r\n')
     end
@@ -1973,6 +1977,35 @@ end
 
 function sampev.onServerMessage(color, text)
     return safeEventCall('сообщения сервера', handleServerMessageEvent, color, text)
+end
+
+function handleAutoMaskTimer(x, y, text)
+    if not autoMaskRenew[0] or maskRpPending then return end
+    if trim(stripColorCodes(text)) ~= '00:03' then return end
+    x, y = tonumber(x), tonumber(y)
+    if not x or not y or math.abs(x - 37.0) > 2.0 or math.abs(y - 306.0) > 2.0 then return end
+    local now = os.time()
+    if now - lastAutoMaskRenewAt < 15 then return end
+    lastAutoMaskRenewAt = now
+    commandMask()
+end
+
+function handleAutoMaskTextdrawUpdate(id, text)
+    if not autoMaskRenew[0] or trim(stripColorCodes(text)) ~= '00:03' then return end
+    if not sampTextdrawIsExists(id) then return end
+    local x, y = sampTextdrawGetPos(id)
+    handleAutoMaskTimer(x, y, text)
+end
+
+function sampev.onShowTextDraw(id, textdraw)
+    return safeEventCall('появления таймера маски', function()
+        if type(textdraw) ~= 'table' or type(textdraw.position) ~= 'table' then return end
+        handleAutoMaskTimer(textdraw.position.x, textdraw.position.y, textdraw.text)
+    end)
+end
+
+function sampev.onTextDrawSetString(id, text)
+    return safeEventCall('обновления таймера маски', handleAutoMaskTextdrawUpdate, id, text)
 end
 
 local function handleAutoEquipment(dialogId, style, button1, text)
@@ -5420,14 +5453,17 @@ end
 local function commandSearch(args)
     local id, reason = trim(args):match('^(%d+)%s+(.+)$')
     if not id or trim(reason) == '' then
-        notify('Использование: /search или /se [ID] [основание]')
+        notify('Использование: /search или /se [ID] [1, 2 или основание]')
         return
     end
+    reason = trim(reason)
+    if reason == '1' then reason = 'Первичный'
+    elseif reason == '2' then reason = 'Полный' end
     runSequence('Обыск', {
         '/me надел одноразовые перчатки и подготовился к проведению обыска',
         '/me последовательно проверил одежду и личные вещи задержанного, соблюдая меры безопасности',
         '/search {id} {cmd_reason}'
-    }, { targetId = tonumber(id), tokens = { ['{cmd_reason}'] = trim(reason) } })
+    }, { targetId = tonumber(id), tokens = { ['{cmd_reason}'] = reason } })
 end
 
 local function commandArrest(args)
@@ -5739,7 +5775,7 @@ local serverCommandSections = {
             {'/open [аргументы]', 'RP и серверная команда отправляются сразу без задержки', '/open'},
             {'/pull ID', 'Вытащить игрока из транспорта', '/pull 15'},
             {'/putpl ID', 'Посадить задержанного в патрульную машину', '/putpl 15'},
-            {'/search ID основание', 'Универсальный обыск без навязанного типа; основание обязательно', '/search 15 Обыск при задержании'},
+            {'/search ID основание', '1 – Первичный, 2 – Полный; иной текст передаётся как есть', '/search 15 1'},
             {'/setmark ID', 'Команда отправляется сразу; RP только после успешного обнаружения', '/setmark 15'},
             {'/signal [аргументы]', 'Установить сигнализацию в бизнесе по заявке владельца', '/signal'},
             {'/skip ID', 'Выдать пропуск на объект с ограниченным доступом', '/skip 15'},
@@ -5787,7 +5823,7 @@ local helperCommandSections = {
             {'/uncf ID', 'Мгновенно: /uncuff, /cuff и OOC-откат без RP-отыгровок', '/uncf 15'},
             {'/hd ID', 'Короткая версия /hold с полной RP-логикой', '/hd 15'},
             {'/pl ID', 'Короткая версия /putpl с полной RP-логикой', '/pl 15'},
-            {'/se ID основание', 'Короткая версия /search с полной RP-логикой', '/se 15 Обыск при задержании'},
+            {'/se ID основание', 'Короткая версия /search; 1 – Первичный, 2 – Полный', '/se 15 2'},
             {'/wd [1/2]', 'Короткая версия /wanted', '/wd 1'},
             {'/sm ID', 'Короткая версия /setmark; отправляется без задержки', '/sm 15'}
         }
@@ -8154,6 +8190,9 @@ function drawSettings()
             saveConfig()
         end
         imgui.TextWrapped(u8'Когда найденная через /wanted, /setmark или /sm цель окажется не дальше 100 метров, один раз отправится: /re Просьба проследить! ID: X. Общий интервал автоматических репортов – 15 секунд.')
+        section('Маска')
+        if imgui.Checkbox(u8'Автоматически надевать новую маску за 3 секунды до конца таймера', autoMaskRenew) then saveConfig() end
+        imgui.TextWrapped(u8'По умолчанию выключено. Скрипт узнаёт таймер по тексту и расположению текстдрава; /mask отправляется один раз при 00:03. ID текстдрава не используется.')
         if imgui.Checkbox(u8'Отправлять /reset после успешного надевания маски', resetAfterMask) then saveConfig() end
         section('Автоматические доклады в /r')
         if imgui.Checkbox(u8'Отправлять доклады вместе с действиями', autoRadioReports) then saveConfig() end
