@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '21092026_144031'
+LOCAL_VERSION = '21092026_145333'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -726,6 +726,12 @@ local lastStatsRequest = -1000
 local profileLoadedAutomatically = false
 local bodycamEnabled = false
 sosConfirm = new.bool(false)
+sosEscalationActive = false
+sosEscalationAwaiting = false
+sosEscalationId = -1
+sosEscalationConfirmed = 0
+sosEscalationNextAt = 0.0
+sosEscalationExpiresAt = 0.0
 trackedTargetId = -1
 trackedTargetNickname = ''
 trackingConfirmed = false
@@ -1814,6 +1820,26 @@ function handleServerMessageEvent(color, text)
         sharedTrackingSwitchUntil = 0.0
     end
 
+    local sosGpsId, sosWantedLevel = confirmationText:match(
+        '^Вы объявили .+ в розыск%. Причина:%s*SOS! GPS:%s*(%d+)%. Текущий уровень розыска%s+(%d+)$'
+    )
+    sosGpsId, sosWantedLevel = tonumber(sosGpsId), tonumber(sosWantedLevel)
+    if sosEscalationActive and sosEscalationAwaiting
+        and sosGpsId == sosEscalationId and sosWantedLevel
+    then
+        sosEscalationAwaiting = false
+        sosEscalationConfirmed = sosEscalationConfirmed + 1
+        sosEscalationExpiresAt = 0.0
+        if sosEscalationConfirmed >= 3 or sosWantedLevel >= 6 then
+            sosEscalationActive = false
+            sosEscalationId = -1
+            sosEscalationConfirmed = 0
+            sosEscalationNextAt = 0.0
+        else
+            sosEscalationNextAt = os.clock() + math.max(0.25, delayMs[0] / 1000.0)
+        end
+    end
+
     local wantedConfirmed = confirmationText:match('^Вы объявили .+ в розыск%.') ~= nil
     if wantedConfirmed and pendingWantedTargetId >= 0
         and os.clock() <= pendingWantedExpiresAt
@@ -2469,8 +2495,14 @@ local function replaceTokens(text, target, extraValues)
     }
     local city = values['{city}']
     local location = values['{location}']
+    local shortCity = city == 'Los Santos' and 'LS'
+        or city == 'San Fierro' and 'SF'
+        or city == 'Las Venturas' and 'LV'
+        or city
     values['{place}'] = city ~= '' and location ~= '' and city ~= location
         and (city .. ', район ' .. location) or (location ~= '' and location or city)
+    values['{place_short}'] = shortCity ~= '' and location ~= '' and city ~= location
+        and (shortCity .. ', ' .. location) or (location ~= '' and location or shortCity)
     for token, value in pairs(values) do
         local pattern = token:gsub('([%%%-%^%$%(%)%.%[%]%*%+%?])', '%%%1')
         text = text:gsub(pattern, function() return value end)
@@ -5568,17 +5600,40 @@ function commandHealme()
     end)
 end
 
+function sendSosEscalationStep(includeRoleplay)
+    if not sosEscalationActive or sosEscalationId < 0 or sequenceBusy then return false end
+    refreshPatrolData()
+    local lines = {}
+    if includeRoleplay then
+        lines[#lines + 1] = '/me нажал тревожную кнопку на нагрудной радиостанции'
+    end
+    lines[#lines + 1] = factionPrefix()
+        .. 'SOS! Помощь на GPS ' .. sosEscalationId .. '. {place_short}.'
+    lines[#lines + 1] = '/su ' .. sosEscalationId .. ' 1 SOS! GPS: ' .. sosEscalationId
+    if includeRoleplay then
+        appendAutomaticRadioReport(lines, 'CODE-0! SOS, нужна поддержка. 10-20: {place}.')
+    end
+    sosEscalationAwaiting = true
+    sosEscalationNextAt = 0.0
+    sosEscalationExpiresAt = os.clock() + 15.0
+    runSequence('Тревожная кнопка', lines)
+    return true
+end
+
 function activateSos()
     local ok, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
     if not ok then notify('Не удалось определить собственный ID.'); return end
-    refreshPatrolData()
-    local lines = {
-        '/me нажал тревожную кнопку на нагрудной радиостанции',
-        factionPrefix() .. 'Нажата тревожная кнопка SOS! Юниту требуется помощь. 10-20: {place}.',
-        '/su ' .. id .. ' 1 SOS'
-    }
-    appendAutomaticRadioReport(lines, 'CODE-0! SOS, нужна поддержка. 10-20: {place}.')
-    runSequence('Тревожная кнопка', lines)
+    if sequenceBusy then
+        notify('Сначала дождитесь завершения действия: ' .. sequenceName .. '.')
+        return
+    end
+    sosEscalationActive = true
+    sosEscalationAwaiting = false
+    sosEscalationId = id
+    sosEscalationConfirmed = 0
+    sosEscalationNextAt = 0.0
+    sosEscalationExpiresAt = 0.0
+    sendSosEscalationStep(true)
 end
 
 function commandSos()
@@ -5592,6 +5647,12 @@ end
 function commandSosCancel()
     local ok, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
     if not ok then notify('Не удалось определить собственный ID.'); return end
+    sosEscalationActive = false
+    sosEscalationAwaiting = false
+    sosEscalationId = -1
+    sosEscalationConfirmed = 0
+    sosEscalationNextAt = 0.0
+    sosEscalationExpiresAt = 0.0
     commandClear(id .. ' GPS OFF')
 end
 
@@ -8417,7 +8478,8 @@ quickMenuTitles = {
     megaphone = 'МЕГАФОН',
     communication = 'ОБЩЕНИЕ',
     radio = 'РАЦИЯ',
-    equipment = 'СНАРЯЖЕНИЕ'
+    equipment = 'СНАРЯЖЕНИЕ',
+    command_input = 'ВВОД КОМАНД'
 }
 
 quickActionPages = {
@@ -8425,7 +8487,8 @@ quickActionPages = {
         { label = 'Мегафон  ›', page = 'megaphone', submenu = true },
         { label = 'Общение  ›', page = 'communication', submenu = true },
         { label = 'Рация  ›', page = 'radio', submenu = true },
-        { label = 'Снаряжение  ›', page = 'equipment', submenu = true }
+        { label = 'Снаряжение  ›', page = 'equipment', submenu = true },
+        { label = 'Ввод команд  ›', page = 'command_input', submenu = true }
     },
     communication = {
         { id = 'traffic_contact', label = 'Фара, окно', action = commandTrafficStopContact },
@@ -8676,7 +8739,7 @@ function drawSosConfirm(context)
     local flags = imgui.WindowFlags.NoResize + imgui.WindowFlags.NoMove
         + imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoSavedSettings
     if imgui.Begin(u8'Тревожная кнопка', sosConfirm, flags) then
-        imgui.TextWrapped(u8'Будет добавлена 1 звезда розыска с причиной SOS. Запрос помощи с текущим городом и районом отправится в /f; доклад в /r – только если он включён в настройках.')
+        imgui.TextWrapped(u8'Три раза подряд будут отправлены короткий запрос помощи в /f и /su с одной звездой по причине SOS! GPS: ID. Каждый повтор выполняется только после подтверждения сервера.')
         imgui.Spacing()
         if imgui.Button(u8'Активировать', imgui.ImVec2(195, 32)) then
             sosConfirm[0] = false
@@ -8964,6 +9027,23 @@ function main()
             end
         end
         local runtimeNow = os.clock()
+        if sosEscalationActive then
+            if sosEscalationAwaiting and sosEscalationExpiresAt > 0
+                and runtimeNow > sosEscalationExpiresAt
+            then
+                sosEscalationActive = false
+                sosEscalationAwaiting = false
+                sosEscalationId = -1
+                sosEscalationConfirmed = 0
+                sosEscalationNextAt = 0.0
+                sosEscalationExpiresAt = 0.0
+                notify('Повторение SOS остановлено: сервер не подтвердил выдачу розыска.')
+            elseif not sosEscalationAwaiting and sosEscalationNextAt > 0
+                and runtimeNow >= sosEscalationNextAt and not sequenceBusy
+            then
+                safeRuntimeCall('повторения SOS', function() sendSosEscalationStep(false) end)
+            end
+        end
         if putplRpClosePending and runtimeNow >= putplRpCloseAt then
             putplRpClosePending = false
             putplRpCloseAt = 0.0
