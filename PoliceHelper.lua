@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '18092026_115821'
+LOCAL_VERSION = '21092026_144031'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -513,7 +513,7 @@ local defaults = {
         commandAliases = '',
         customCommands = '',
         actionHotkeys = '',
-        actionHotkeyLayoutVersion = 7,
+        actionHotkeyLayoutVersion = 8,
         autoEquipment = false,
         weaponRoleplay = false,
         equipmentKnown = 'Щит|Дубинка|Пистолет с глушителем 9 мм|Бронежилет|Маска|Desert Eagle|MP5|M4|Дробовик|Дымовые шашки',
@@ -927,7 +927,10 @@ function applyRecommendedActionHotkeys()
         verbal_warning = { 0x4A, 0x39 },
         radio_status = { 0x4B, 0x31 }, backup = { 0x4B, 0x32 }, sos = { 0x4B, 0x33 },
         mask = { 0x4C, 0x31 }, healme = { 0x4C, 0x32 },
-        fix = { 0x4C, 0x33 }, bodycam = { 0x4C, 0x34 }
+        fix = { 0x4C, 0x33 }, bodycam = { 0x4C, 0x34 },
+        input_cf = { 0x49, 0x31 }, input_hd = { 0x49, 0x32 },
+        input_pl = { 0x49, 0x33 }, input_pg = { 0x49, 0x34 },
+        input_vn = { 0x49, 0x35 }, input_y = { 0x49, 0x36 }
     }
     for id, keys in pairs(recommended) do
         actionHotkeys[id] = { key1 = keys[1], key2 = keys[2], useSecond = true, wasDown = false }
@@ -1035,6 +1038,14 @@ if loadedActionHotkeyVersion < 7 then
     if not actionHotkeys.fix then
         actionHotkeys.fix = { key1 = 0x4C, key2 = 0x33, useSecond = true, wasDown = false }
     end
+end
+if loadedActionHotkeyVersion < 8 then
+    actionHotkeys.input_cf = actionHotkeys.input_cf or { key1 = 0x49, key2 = 0x31, useSecond = true, wasDown = false }
+    actionHotkeys.input_hd = actionHotkeys.input_hd or { key1 = 0x49, key2 = 0x32, useSecond = true, wasDown = false }
+    actionHotkeys.input_pl = actionHotkeys.input_pl or { key1 = 0x49, key2 = 0x33, useSecond = true, wasDown = false }
+    actionHotkeys.input_pg = actionHotkeys.input_pg or { key1 = 0x49, key2 = 0x34, useSecond = true, wasDown = false }
+    actionHotkeys.input_vn = actionHotkeys.input_vn or { key1 = 0x49, key2 = 0x35, useSecond = true, wasDown = false }
+    actionHotkeys.input_y = actionHotkeys.input_y or { key1 = 0x49, key2 = 0x36, useSecond = true, wasDown = false }
 end
 
 local cpUpper = 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'
@@ -1179,7 +1190,7 @@ local function saveConfig()
     config.main.commandAliases = serializeEditorEntries(commandAliases, 'target')
     config.main.customCommands = serializeEditorEntries(customCommands, 'body')
     config.main.actionHotkeys = serializeActionHotkeys()
-    config.main.actionHotkeyLayoutVersion = 7
+    config.main.actionHotkeyLayoutVersion = 8
     config.main.autoEquipment = autoEquipment[0]
     config.main.weaponRoleplay = weaponRoleplay[0]
     config.main.equipmentKnown = table.concat(equipmentKnown, '|')
@@ -5484,9 +5495,7 @@ local function commandClear(args)
     runSequence('Снятие розыска', {
         '/me открыл базу МВД и выбрал нужную запись',
         '/me указал причину аннулирования записи: {cmd_reason}.',
-        '/clear {id} {cmd_reason}',
-        factionPrefix() .. 'Гражданин {name} удален из списка разыскиваемых.',
-        factionPrefix() .. 'По причине: {cmd_reason}'
+        '/clear {id} {cmd_reason}'
     }, { targetId = tonumber(id), tokens = { ['{cmd_reason}'] = trim(reason) } })
 end
 
@@ -5563,19 +5572,13 @@ function activateSos()
     local ok, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
     if not ok then notify('Не удалось определить собственный ID.'); return end
     refreshPatrolData()
-    local unit = unitPrefix()
-    if unit == '' then unit = 'без маркировки' end
-
     local lines = {
         '/me нажал тревожную кнопку на нагрудной радиостанции',
-        '/su ' .. id .. ' 3 SOS'
+        factionPrefix() .. 'Нажата тревожная кнопка SOS! Юниту требуется помощь. 10-20: {place}.',
+        '/su ' .. id .. ' 1 SOS'
     }
-    appendAutomaticRadioReport(lines, 'CODE-0! SOS, нужна поддержка. 10-20: {location}.')
-    lines[#lines + 1] = factionPrefix() .. 'CODE-0! SOS. {department}, юнит {sos_unit}.'
-    lines[#lines + 1] = factionPrefix() .. 'Требуется поддержка. 10-20: {location}.'
-    runSequence('Тревожная кнопка', lines, { tokens = {
-        ['{sos_unit}'] = unit
-    } })
+    appendAutomaticRadioReport(lines, 'CODE-0! SOS, нужна поддержка. 10-20: {place}.')
+    runSequence('Тревожная кнопка', lines)
 end
 
 function commandSos()
@@ -5762,7 +5765,7 @@ local serverCommandSections = {
         rows = {
             {'/arrest ID причина', 'Передать игрока в участок; RP выполняется автоматически', '/arrest 15 3.1 УК'},
             {'/break [аргументы]', 'Выставить или убрать служебное ограждение', '/break'},
-            {'/clear ID причина', 'Снять розыск и доложить причину в /f; RP выполняется автоматически', '/clear 15 Ошибка'},
+            {'/clear ID причина', 'Снять розыск; RP выполняется автоматически, без доклада в /f', '/clear 15 Ошибка'},
             {'/cuff ID', 'Надеть наручники; RP выполняется автоматически', '/cuff 15'},
             {'/d', 'Открыть или закрыть дверь; RP выполняется после ответа сервера', '/d'},
             {'/form', 'Включить или отключить возможность менять форму', '/form'},
@@ -6097,6 +6100,14 @@ function commandServerPass(args)
         return
     end
     sampSendChat(args)
+end
+
+function openCommandInput(command)
+    command = trim(tostring(command or ''))
+    if command == '' then return end
+    if command:sub(1, 1) ~= '/' then command = '/' .. command end
+    sampSetChatInputEnabled(true)
+    sampSetChatInputText(command .. ' ')
 end
 
 local function commandDetentionMode(args)
@@ -7758,15 +7769,16 @@ end
 
 function drawActionHotkeys()
     section('Горячие действия')
-    imgui.TextWrapped(u8'Каждому пункту быстрого меню можно назначить одну клавишу или сочетание двух. Горячие действия не срабатывают в чате, диалогах и открытых окнах PoliceHelper.')
-    imgui.TextColored(imgui.ImVec4(0.45, 0.82, 0.55, 1.0), u8'M – мегафон, J – общение, K – рация, L – снаряжение. Цифра выбирает действие; WASD остаётся свободным.')
+    imgui.TextWrapped(u8'Каждому действию можно назначить одну клавишу или сочетание двух. Горячие действия не срабатывают в чате, диалогах и открытых окнах PoliceHelper.')
+    imgui.TextColored(imgui.ImVec4(0.45, 0.82, 0.55, 1.0), u8'M – мегафон, J – общение, K – рация, L – снаряжение, I – ввод команды. Цифра выбирает действие; WASD остаётся свободным.')
     if imgui.Button(u8'Вернуть рекомендуемые назначения', imgui.ImVec2(285, 28)) then resetRecommendedActionHotkeys() end
     imgui.Separator()
     local categories = {
         { id = 'megaphone', title = 'Мегафон' },
         { id = 'communication', title = 'Общение' },
         { id = 'radio', title = 'Рация' },
-        { id = 'equipment', title = 'Снаряжение' }
+        { id = 'equipment', title = 'Снаряжение' },
+        { id = 'command_input', title = 'Заготовки команд с ID' }
     }
     imgui.BeginChild('##actionHotkeysList', imgui.ImVec2(0, 0), false)
     for _, category in ipairs(categories) do
@@ -8437,6 +8449,14 @@ quickActionPages = {
         { id = 'fix', label = 'Ремкомплект', action = function() sampSendChat('/fix') end },
         { id = 'bodycam', label = 'Боди-камера', action = commandBodycam }
     },
+    command_input = {
+        { id = 'input_cf', label = 'Ввести /cf', action = function() openCommandInput('/cf') end },
+        { id = 'input_hd', label = 'Ввести /hd', action = function() openCommandInput('/hd') end },
+        { id = 'input_pl', label = 'Ввести /pl', action = function() openCommandInput('/pl') end },
+        { id = 'input_pg', label = 'Ввести /pg', action = function() openCommandInput('/pg') end },
+        { id = 'input_vn', label = 'Ввести /vn', action = function() openCommandInput('/vn') end },
+        { id = 'input_y', label = 'Ввести /y', action = function() openCommandInput('/y') end }
+    },
     megaphone = {
         { id = 'm55', label = '10-55', action = commandM55 },
         { id = 'm66', label = '10-66', action = commandM66 },
@@ -8656,7 +8676,7 @@ function drawSosConfirm(context)
     local flags = imgui.WindowFlags.NoResize + imgui.WindowFlags.NoMove
         + imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoSavedSettings
     if imgui.Begin(u8'Тревожная кнопка', sosConfirm, flags) then
-        imgui.TextWrapped(u8'Будет выдан 3-й уровень розыска с причиной SOS. Доклад в /f отправится всегда, а в /r – только если включены автоматические доклады в настройках.')
+        imgui.TextWrapped(u8'Будет добавлена 1 звезда розыска с причиной SOS. Запрос помощи с текущим городом и районом отправится в /f; доклад в /r – только если он включён в настройках.')
         imgui.Spacing()
         if imgui.Button(u8'Активировать', imgui.ImVec2(195, 32)) then
             sosConfirm[0] = false
