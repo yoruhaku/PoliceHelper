@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '21092026_145333'
+LOCAL_VERSION = '21092026_152157'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -747,6 +747,7 @@ cuffRpPendingNickname = ''
 cuffRpPendingActor = ''
 cuffRpPendingUntil = 0.0
 uncuffRpPending = false
+uncuffRpPendingNickname = ''
 uncuffRpPendingActor = ''
 uncuffRpPendingUntil = 0.0
 holdRpPendingId = -1
@@ -1610,13 +1611,18 @@ function handleServerMessageEvent(color, text)
             local cuffConfirmed = cuffRpPendingActor ~= ''
                 and (ownActionText:find(' ' .. cuffRpPendingActor .. ' надел на ', 1, true)
                     or ownActionText:find(' ' .. cuffRpPendingActor .. ' надела на ', 1, true))
+                and cuffRpPendingNickname ~= ''
+                and ownActionText:find(' на ' .. cuffRpPendingNickname .. ' наручники', 1, true)
                 and ownActionText:find(' наручники', 1, true)
             if cuffConfirmed then
                 cuffRpPendingId = -1
                 cuffRpPendingNickname = ''
                 cuffRpPendingActor = ''
                 cuffRpPendingUntil = 0.0
-                sampSendChat(configuredRoleplayLine('cuff', 2, '/me зафиксировал наручники на запястьях задержанного'))
+                runSequence('Наручники после подтверждения', {
+                    configuredRoleplayLine('cuff', 1, '/me снял наручники с поясного держателя и раскрыл фиксирующий механизм'),
+                    configuredRoleplayLine('cuff', 2, '/me зафиксировал наручники на запястьях задержанного')
+                })
             end
         end
     end
@@ -1624,6 +1630,7 @@ function handleServerMessageEvent(color, text)
     if uncuffRpPending then
         if os.clock() > uncuffRpPendingUntil then
             uncuffRpPending = false
+            uncuffRpPendingNickname = ''
             uncuffRpPendingActor = ''
             uncuffRpPendingUntil = 0.0
         else
@@ -1631,12 +1638,18 @@ function handleServerMessageEvent(color, text)
             local uncuffConfirmed = uncuffRpPendingActor ~= ''
                 and (ownActionText:find(' ' .. uncuffRpPendingActor .. ' снял с ', 1, true)
                     or ownActionText:find(' ' .. uncuffRpPendingActor .. ' сняла с ', 1, true))
+                and uncuffRpPendingNickname ~= ''
+                and ownActionText:find(' с ' .. uncuffRpPendingNickname .. ' наручники', 1, true)
                 and ownActionText:find(' наручники', 1, true)
             if uncuffConfirmed then
                 uncuffRpPending = false
+                uncuffRpPendingNickname = ''
                 uncuffRpPendingActor = ''
                 uncuffRpPendingUntil = 0.0
-                sampSendChat(configuredRoleplayLine('uncuff', 2, '/me снял наручники с рук задержанного и закрепил их на поясе'))
+                runSequence('Снятие наручников после подтверждения', {
+                    configuredRoleplayLine('uncuff', 1, '/me достал ключ и открыл фиксирующий механизм наручников'),
+                    configuredRoleplayLine('uncuff', 2, '/me снял наручники с рук задержанного и закрепил их на поясе')
+                })
             end
         end
     end
@@ -2721,7 +2734,7 @@ function applyRoleplayOverrides(sequenceName, lines)
     return result
 end
 
-local function runSequence(name, lines, options)
+function runSequence(name, lines, options)
     options = options or {}
     lines = applyRoleplayOverrides(name, lines)
     if sequenceBusy then
@@ -5380,22 +5393,22 @@ local function commandCuff(args)
     cuffRpPendingNickname = nickname or ''
     cuffRpPendingActor = getLocalName()
     cuffRpPendingUntil = os.clock() + 15.0
-    runSequence('Наручники', {
-        '/me снял наручники с поясного держателя и раскрыл фиксирующий механизм',
-        '/cuff {id}'
-    }, { targetId = id })
+    sampSendChat('/cuff ' .. id)
 end
 
 local function commandUncuff(args)
+    if sequenceBusy then
+        notify('Сначала дождитесь завершения действия: ' .. sequenceName .. '.')
+        return
+    end
     local id = parseIdOnly(args, '/uncuff [ID]')
     if not id then return end
+    local _, nickname = getPlayerById(id)
     uncuffRpPending = true
+    uncuffRpPendingNickname = nickname or ''
     uncuffRpPendingActor = getLocalName()
     uncuffRpPendingUntil = os.clock() + 15.0
-    runSequence('Снятие наручников', {
-        '/me достал ключ и открыл фиксирующий механизм наручников.',
-        '/uncuff {id}'
-    }, { targetId = id })
+    sampSendChat('/uncuff ' .. id)
 end
 
 function commandUncf(args)
@@ -5403,6 +5416,7 @@ function commandUncf(args)
     if not id then return end
     -- Эта команда не должна запускать отложенные RP-строки обычных /uncuff и /cuff.
     uncuffRpPending = false
+    uncuffRpPendingNickname = ''
     uncuffRpPendingActor = ''
     uncuffRpPendingUntil = 0.0
     cuffRpPendingId = -1
