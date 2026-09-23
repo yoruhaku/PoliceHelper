@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '21092026_152157'
+LOCAL_VERSION = '22092026_194014'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -1539,12 +1539,15 @@ familyReservedTags = {
     SIGNAL = true, BANK = true, PVP = true, Admin = true, GunGame = true
 }
 
--- Каждую строку проверяем отдельно: название семьи не сохраняется и не сравнивается.
--- Семейные сообщения определяются по структуре с рангом перед ником либо по тексту
--- системного уведомления о семье. Серверные каналы заранее исключены.
+detectedFamilyTags = detectedFamilyTags or {}
+
+-- Название семьи определяется автоматически по однозначному семейному сообщению
+-- или по структуре семейного чата. После определения скрываются все сообщения
+-- с тем же первым префиксом, включая уведомления шкафа, кассы и состава.
 function isFamilyMessage(clean)
     local tag, remainder = tostring(clean or ''):match('^%[([^%[%]]+)%]%s+(.+)$')
     if not tag or familyReservedTags[tag] then return false end
+    if detectedFamilyTags[tag] then return true end
 
     local lowered = lowerCp1251(' ' .. remainder)
     local explicitFamily = lowered:find(' в семью', 1, true)
@@ -1557,13 +1560,41 @@ function isFamilyMessage(clean)
         or lowered:find(' выполнил контракт', 1, true)
 
     -- Системные сообщения семьи могут не содержать ник в формате Nick_Name.
-    if explicitFamily then return true end
+    if explicitFamily then
+        detectedFamilyTags[tag] = true
+        return true
+    end
 
-    -- Семейный ранг и отображаемое имя могут называться как угодно и не обязаны
-    -- содержать подчёркивание. До двоеточия должны находиться минимум два слова.
+    -- Новый формат: [СЕМЬЯ] [РАНГ ИЗ НЕСКОЛЬКИХ СЛОВ] Nick_Name: сообщение.
+    local afterBracketRank = remainder:match('^%[[^%[%]]+%]%s+(.+)$')
+    if afterBracketRank then
+        local nickname = trim(afterBracketRank:match('^([^:]+):') or '')
+        if nickname:find('_', 1, true) and nickname:match('^[A-Za-z0-9_]+$') then
+            detectedFamilyTags[tag] = true
+            return true
+        end
+    end
+
+    -- Формат без отображаемого ранга: [СЕМЬЯ] Nick_Name: сообщение.
+    local directNickname = trim(remainder:match('^([^%s:]+):') or '')
+    if directNickname:find('_', 1, true)
+        and directNickname:match('^[A-Za-z0-9_]+$')
+    then
+        detectedFamilyTags[tag] = true
+        return true
+    end
+
+    -- Старый формат: [СЕМЬЯ] Ранг Nick_Name: сообщение.
     local speaker = trim(remainder:match('^([^:]+):') or '')
-    if speaker == '' or speaker:find('[', 1, true) or speaker:find(']', 1, true) then return false end
-    return speaker:match('^%S+%s+%S+') ~= nil
+    local rank, nickname = speaker:match('^(.+)%s+([^%s]+)$')
+    if rank and nickname and nickname:find('_', 1, true)
+        and nickname:match('^[A-Za-z0-9_]+$')
+    then
+        detectedFamilyTags[tag] = true
+        return true
+    end
+
+    return false
 end
 
 function handleServerMessageEvent(color, text)
