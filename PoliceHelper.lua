@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '24092026_214511'
+LOCAL_VERSION = '25092026_220632'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -804,6 +804,9 @@ weaponRpLastSentAt = -100.0
 sharedTrackingOfferId = -1
 sharedTrackingOfferName = ''
 sharedTrackingOfferUntil = 0.0
+detentionOfferId = -1
+detentionOfferUntil = 0.0
+detentionOfferShownForTargetId = -1
 sharedTrackingSwitchId = -1
 sharedTrackingSwitchName = ''
 sharedTrackingSwitchUntil = 0.0
@@ -1813,12 +1816,12 @@ function handleServerMessageEvent(color, text)
     sharedCaseId = tonumber(sharedCaseId)
     if sharedCaseId and sharedCaseId ~= trackedTargetId
         and sampIsPlayerConnected(sharedCaseId)
-        and isTrackingPartnerInSameVehicle(sharedActor)
+        and isTrackingOfferFromOtherOfficer(sharedActor)
     then
         sharedTrackingOfferId = sharedCaseId
         sharedTrackingOfferName = trim(sharedCaseName)
         sharedTrackingOfferUntil = os.clock() + 12.0
-        notify('Напарник получил координаты дела №' .. sharedCaseId .. ' – '
+        notify('Сотрудник получил координаты дела №' .. sharedCaseId .. ' – '
             .. sharedTrackingOfferName .. '. Y – отслеживать, N – отказаться.')
     end
 
@@ -2269,24 +2272,13 @@ local function getCharVehicleSafe(ped)
     return vehicle
 end
 
-function isTrackingPartnerInSameVehicle(actorNickname)
+function isTrackingOfferFromOtherOfficer(actorNickname)
     if not actorNickname or actorNickname == '' then return false end
-    local selfVehicle = getCharVehicleSafe(PLAYER_PED)
-    if not selfVehicle then return false end
     local selfCallOk, selfFound, selfId = pcall(sampGetPlayerIdByCharHandle, PLAYER_PED)
-    if not selfCallOk or not selfFound then selfId = -1 end
-
-    for id = 0, 1003 do
-        if id ~= selfId and sampIsPlayerConnected(id) then
-            local nickOk, nickname = pcall(sampGetPlayerNickname, id)
-            if nickOk and nickname == actorNickname then
-                local pedOk, found, ped = pcall(sampGetCharHandleBySampPlayerId, id)
-                if not pedOk or not found or not ped then return false end
-                return getCharVehicleSafe(ped) == selfVehicle
-            end
-        end
-    end
-    return false
+    if not selfCallOk or not selfFound then return false end
+    local nickOk, ownNickname = pcall(sampGetPlayerNickname, selfId)
+    return nickOk and ownNickname ~= nil and ownNickname ~= ''
+        and ownNickname ~= actorNickname
 end
 
 local function getVehicleNameSafe(vehicle)
@@ -5332,8 +5324,12 @@ end
 local wantedArticles = {}
 local wantedArticleList = {}
 local wantedGroupTitle = 'Уголовный кодекс'
+wantedArticleDetailsTarget = nil
 for _, line in ipairs(referenceLines['УК']) do
-    if isChapterHeading(line) then wantedGroupTitle = line end
+    if isChapterHeading(line) then
+        wantedGroupTitle = line
+        wantedArticleDetailsTarget = nil
+    end
     local article = line:match('^(%d+%.%d+[%d%.]*)')
     local stars = line:match('присваивается%s+(%d)')
         or line:match('получает%s+(%d)')
@@ -5348,9 +5344,15 @@ for _, line in ipairs(referenceLines['УК']) do
             article = article,
             stars = tonumber(stars),
             text = line,
+            details = {},
             group = wantedGroupTitle
         }
         table.insert(wantedArticleList, wantedArticles[article])
+        wantedArticleDetailsTarget = wantedArticles[article]
+    elseif article then
+        wantedArticleDetailsTarget = nil
+    elseif wantedArticleDetailsTarget then
+        table.insert(wantedArticleDetailsTarget.details, line)
     end
 end
 
@@ -5358,10 +5360,12 @@ local ticketArticles = {}
 local ticketArticleList = {}
 local akChapter = 1
 local ticketGroupTitle = 'Административный кодекс'
+ticketArticleDetailsTarget = nil
 for _, line in ipairs(referenceLines['АК']) do
     if isChapterHeading(line) then
         if line:find('Глава II', 1, true) then akChapter = 2 end
         ticketGroupTitle = line
+        ticketArticleDetailsTarget = nil
     end
     local article
     if akChapter == 1 then
@@ -5377,9 +5381,15 @@ for _, line in ipairs(referenceLines['АК']) do
             article = article,
             amount = amount and tonumber((amount:gsub('%.', ''))) or nil,
             text = line,
+            details = {},
             group = ticketGroupTitle
         }
         table.insert(ticketArticleList, ticketArticles[article])
+        ticketArticleDetailsTarget = ticketArticles[article]
+    elseif line:match('^Статья%s+') then
+        ticketArticleDetailsTarget = nil
+    elseif ticketArticleDetailsTarget then
+        table.insert(ticketArticleDetailsTarget.details, line)
     end
 end
 
@@ -5398,16 +5408,6 @@ end
 
 local wantedArticleGroups = groupArticles(wantedArticleList)
 local ticketArticleGroups = groupArticles(ticketArticleList)
-
-local function shortArticleText(data)
-    local text = data.text:gsub('^Статья%s+%d+%.?%d*%s*', '')
-    text = text:gsub('^' .. data.article:gsub('%.', '%%.') .. '%.?%s*', '')
-    text = text:gsub('%s+[Нн]арушителю%s+присваивается.*$', '')
-    text = text:gsub('%s+[Нн]арушитель%s+получает.*$', '')
-    text = text:gsub('%s+на правонарушителя%s+налагается.*$', '')
-    text = text:gsub('%s+на водителя%s+налагается.*$', '')
-    return trim(text)
-end
 
 local function normalizeArticle(value)
     value = trim(value):upper()
@@ -6032,6 +6032,9 @@ function clearTrackedTarget(removeMarker)
     trackedWaypointY = nil
     trackedWaypointAnnounced = false
     trackedReportSent = false
+    detentionOfferId = -1
+    detentionOfferUntil = 0.0
+    detentionOfferShownForTargetId = -1
     if removeMarker then pcall(removeWaypoint) end
 end
 
@@ -6148,6 +6151,25 @@ function updateTrackedTargetAutomation()
     if not okSelf or not okTarget then return end
     local distance = getDistanceBetweenCoords3d(x1, y1, z1, x2, y2, z2)
     if distance > 100.0 then return end
+
+    local canOfferDetention = not sampIsChatInputActive()
+        and not sampIsDialogActive()
+        and not isSampfuncsConsoleActive()
+        and not isPauseMenuActive()
+        and not window[0]
+        and not quickMenu[0]
+        and not wantedSelector[0]
+        and not ticketSelector[0]
+        and os.clock() > incomingCallUntil
+        and (sharedTrackingOfferId < 0 or os.clock() > sharedTrackingOfferUntil)
+    if canOfferDetention and detentionOfferShownForTargetId ~= trackedTargetId then
+        detentionOfferShownForTargetId = trackedTargetId
+        detentionOfferId = trackedTargetId
+        detentionOfferUntil = os.clock() + 12.0
+        notify('Цель ' .. trackedTargetNickname .. '[' .. trackedTargetId .. '] в '
+            .. math.floor(distance + 0.5) .. ' м. Y – /y ' .. trackedTargetId
+            .. ', N – отказаться.')
+    end
 
     if autoReportTracked[0] and not trackedReportSent and os.clock() - lastAutoReportAt >= 15.0 then
         trackedReportSent = true
@@ -7438,7 +7460,6 @@ function drawArticleSelector(kind)
                 if query ~= '' then imgui.SetNextItemOpen(true, imgui.Cond.Always) end
                 if imgui.CollapsingHeader(u8(group.title .. '##selectorGroup' .. kind .. groupIndex)) then
                     for itemIndex, data in ipairs(matchingItems) do
-                        local description = shortArticleText(data)
                         local heading
                         if isWanted then
                             heading = data.stars
@@ -7451,7 +7472,10 @@ function drawArticleSelector(kind)
                         end
                         local unique = '##article' .. kind .. groupIndex .. '_' .. itemIndex
                         imgui.TextColored(imgui.ImVec4(0.42, 0.72, 1.0, 1.0), u8(heading))
-                        policeHelperSafeWrappedText(description)
+                        policeHelperSafeWrappedText(data.text)
+                        for _, detail in ipairs(data.details or {}) do
+                            policeHelperSafeWrappedText(detail)
+                        end
                         if isWanted and not data.stars then
                             imgui.Text(u8'Уровень розыска:')
                             imgui.SameLine()
@@ -9132,6 +9156,10 @@ function main()
             sharedTrackingOfferName = ''
             sharedTrackingOfferUntil = 0.0
         end
+        if detentionOfferId >= 0 and runtimeNow > detentionOfferUntil then
+            detentionOfferId = -1
+            detentionOfferUntil = 0.0
+        end
         if sharedTrackingSwitchId >= 0 and runtimeNow > sharedTrackingSwitchUntil then
             sharedTrackingSwitchId = -1
             sharedTrackingSwitchName = ''
@@ -9177,7 +9205,10 @@ function main()
         local incomingCallActive = runtimeNow <= incomingCallUntil
         local sharedTrackingOfferActive = sharedTrackingOfferId >= 0
             and runtimeNow <= sharedTrackingOfferUntil
+        local detentionOfferActive = detentionOfferId >= 0
+            and runtimeNow <= detentionOfferUntil
         local promptChoiceActive = incomingCallActive or sharedTrackingOfferActive
+            or detentionOfferActive
         if actionHotkeysAllowed then
             if incomingCallActive then
                 if wasKeyPressed(vkeys.VK_Y) then
@@ -9210,6 +9241,25 @@ function main()
                     sharedTrackingOfferName = ''
                     sharedTrackingOfferUntil = 0.0
                     notify('Совместное отслеживание отклонено.')
+                end
+            elseif detentionOfferActive then
+                if wasKeyPressed(vkeys.VK_Y) then
+                    local offerId = detentionOfferId
+                    detentionOfferId = -1
+                    detentionOfferUntil = 0.0
+                    if trackedTargetId == offerId and trackingConfirmed
+                        and sampIsPlayerConnected(offerId)
+                    then
+                        safeRuntimeCall('режима задержания', function()
+                            commandDetentionMode(tostring(offerId))
+                        end)
+                    else
+                        notify('Цель больше не отслеживается.')
+                    end
+                elseif wasKeyPressed(vkeys.VK_N) then
+                    detentionOfferId = -1
+                    detentionOfferUntil = 0.0
+                    notify('Режим задержания отклонён.')
                 end
             end
         end
