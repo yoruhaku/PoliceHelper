@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '25092026_220632'
+LOCAL_VERSION = '25092026_223226'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -810,6 +810,8 @@ detentionOfferShownForTargetId = -1
 sharedTrackingSwitchId = -1
 sharedTrackingSwitchName = ''
 sharedTrackingSwitchUntil = 0.0
+driveCountdownActive = false
+driveCountdownToken = 0
 quickMenuBlocked = false
 quickMenuNeedsFocus = false
 quickMenuAttackBlockUntil = 0.0
@@ -2859,6 +2861,67 @@ end
 local function radio(text)
     refreshPatrolData()
     sendOne('Доклад в рацию', radioPrefix() .. text)
+end
+
+function commandDrive(args)
+    local value = trim(args)
+    local seconds = tonumber(value)
+    if not value:match('^%d+$') or not seconds or seconds < 5 or seconds > 30 then
+        notify('Использование: /drive [секунды]. Введите число от 5 до 30, например: /drive 30.')
+        return
+    end
+    if driveCountdownActive then
+        notify('Обратный отсчёт /drive уже запущен.')
+        return
+    end
+
+    driveCountdownActive = true
+    driveCountdownToken = driveCountdownToken + 1
+    local token = driveCountdownToken
+    local threadOk, threadErr = pcall(lua_thread.create, function()
+        local function sendDriveMessage(message)
+            if token ~= driveCountdownToken or not isSampAvailable() then return false end
+            local ok, err = pcall(sampSendChat, message)
+            if not ok then protectedError('обратном отсчёте /drive', err) end
+            return ok
+        end
+
+        local function secondsText(count)
+            local lastTwo = count % 100
+            local lastOne = count % 10
+            if lastTwo < 11 or lastTwo > 14 then
+                if lastOne == 1 then return 'секунда' end
+                if lastOne >= 2 and lastOne <= 4 then return 'секунды' end
+            end
+            return 'секунд'
+        end
+
+        if not sendDriveMessage(radioPrefix() .. 'Внимание, вызываю эвакуатор!') then
+            driveCountdownActive = false
+            return
+        end
+        wait(math.max(500, delayMs[0]))
+        local remaining = seconds
+        while remaining > 0 do
+            if not sendDriveMessage('/rn /drive - ' .. remaining .. ' ' .. secondsText(remaining) .. '!') then
+                driveCountdownActive = false
+                return
+            end
+            wait(math.min(5, remaining) * 1000)
+            remaining = remaining - 5
+        end
+        if not sendDriveMessage('/rn !!! /drive !!!') then
+            driveCountdownActive = false
+            return
+        end
+        wait(math.max(500, delayMs[0]))
+        sendDriveMessage('/drive')
+        driveCountdownActive = false
+    end)
+    if not threadOk then
+        driveCountdownActive = false
+        protectedError('запуске обратного отсчёта /drive', threadErr)
+    end
 end
 
 local pages = { 'Команды', 'Рация', 'Справочник', 'Настройки' }
@@ -6007,6 +6070,12 @@ local helperCommandSections = {
         }
     },
     {
+        title = 'Старший состав',
+        rows = {
+            {'/drive 5-30', 'Для 9–10 рангов. Обратный отсчёт, затем серверный /drive; подтверждение остаётся за вами', '/drive 30'}
+        }
+    },
+    {
         title = 'Управление PoliceHelper',
         rows = {
             {'/ph', 'Открыть или закрыть главное окно', '/ph'},
@@ -8001,6 +8070,9 @@ editorCommandGroups = {
         {'r3', '', 'Запросить срочную поддержку'}, {'rstart', '', 'Начать патруль'},
         {'rpat', '', 'Передать статус патруля'}, {'rend', '', 'Закончить патруль'}
     }},
+    { title = 'Старший состав', items = {
+        {'drive', '5-30 секунд', 'Для 9–10 рангов: обратный отсчёт вызова эвакуатора'}
+    }},
     { title = 'Команды МВД', items = {
         {'takelic', 'ID лицензия', 'Изъять лицензию'}, {'takefish', 'ID', 'Изъять рыбный улов'},
         {'skip', 'ID', 'Выдать пропуск'}, {'break', '', 'Установить ограждение'},
@@ -9041,6 +9113,7 @@ function main()
     registerSafeCommand('rstart', commandPatrolStart)
     registerSafeCommand('rpat', commandPatrolStatus)
     registerSafeCommand('rend', commandPatrolEnd)
+    registerSafeCommand('drive', commandDrive)
 
     editorBuiltInHandlers = {
         ph = function() toggleWindow() end, phsync = function() requestStatsNow() end,
@@ -9077,7 +9150,8 @@ function main()
         r4 = function() radio('| Состав: {crew} | Состояние: 10-4') end,
         r20 = function() radio('10-20: {place}. Состояние: 10-4, доступен.') end,
         r3 = function() radio('CODE-3, требуется срочная поддержка. 10-20: {place}.') end,
-        rstart = commandPatrolStart, rpat = commandPatrolStatus, rend = commandPatrolEnd
+        rstart = commandPatrolStart, rpat = commandPatrolStatus, rend = commandPatrolEnd,
+        drive = commandDrive
     }
     for commandName in pairs(editorBuiltInHandlers) do editorReservedCommands[commandName] = true end
     registerAllEditorCommands()
