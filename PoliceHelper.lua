@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '26092026_045025'
+LOCAL_VERSION = '26092026_053254'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -5878,6 +5878,116 @@ local function commandRights()
     })
 end
 
+function getVehicleMegaphoneLines(vehicle, code)
+    local kind = vehicle and getVehicleReportKind(vehicle) or 'Транспорт'
+    if code == 55 then
+        if kind == 'Вертолёт' or kind == 'Самолёт' then
+            return {
+                '/m Внимание! {target_driver}!',
+                '/m Совершите посадку в безопасном месте и заглушите двигатель.',
+                '/m Оставайтесь в кабине и ожидайте указаний.'
+            }
+        elseif kind == 'Катер' then
+            return {
+                '/m Внимание! {target_driver}!',
+                '/m Причальте в безопасном месте и заглушите двигатель.',
+                '/m Оставайтесь на катере и ожидайте указаний.'
+            }
+        elseif kind == 'Поезд' then
+            return {
+                '/m Внимание! {target_driver}!',
+                '/m Остановите поезд на безопасном участке пути.',
+                '/m Оставайтесь в кабине и ожидайте указаний.'
+            }
+        elseif kind == 'Велосипед' then
+            return {
+                '/m Внимание! {target_driver}!',
+                '/m Остановитесь у края дороги и не продолжайте движение.',
+                '/m Оставайтесь рядом с велосипедом и ожидайте указаний.'
+            }
+        elseif kind == 'Мотоцикл' then
+            return {
+                '/m Внимание! {target_driver}!',
+                '/m Прижмитесь к обочине и заглушите двигатель.',
+                '/m Оставайтесь на мотоцикле, держите руки на виду.'
+            }
+        elseif kind == 'Автобус' then
+            return {
+                '/m Внимание! {target_driver}!',
+                '/m Остановите автобус у обочины и заглушите двигатель.',
+                '/m Оставайтесь за рулём и ожидайте указаний.'
+            }
+        elseif kind == 'Транспорт' then
+            return {
+                '/m Внимание! {target_driver}!',
+                '/m Остановитесь в безопасном месте.',
+                '/m Оставайтесь на месте и ожидайте указаний.'
+            }
+        end
+        local cabin = kind == 'Такси' and 'такси' or 'автомобиле'
+        return {
+            '/m Внимание! {target_driver}!',
+            '/m Прижмитесь к обочине и заглушите двигатель.',
+            '/m Оставайтесь в ' .. cabin .. ', держите руки на руле и ожидайте.'
+        }
+    end
+
+    if kind == 'Вертолёт' or kind == 'Самолёт' then
+        local aircraft = kind == 'Вертолёт' and 'вертолёта' or 'самолёта'
+        return {
+            '/m {target_driver}, немедленно совершите посадку!',
+            '/m После посадки заглушите двигатель и держите руки на виду!',
+            '/m Медленно выйдите из ' .. aircraft .. ' с поднятыми руками!',
+            '/m Встаньте спиной к офицерам и не делайте резких движений!'
+        }
+    elseif kind == 'Катер' then
+        return {
+            '/m {target_driver}, немедленно причальте!',
+            '/m Заглушите двигатель и держите руки на виду!',
+            '/m Медленно сойдите с катера с поднятыми руками!',
+            '/m Встаньте спиной к офицерам и не делайте резких движений!'
+        }
+    elseif kind == 'Поезд' then
+        return {
+            '/m {target_driver}, немедленно остановите поезд!',
+            '/m Заглушите двигатель и держите руки на виду!',
+            '/m Медленно выйдите из кабины с поднятыми руками!',
+            '/m Встаньте спиной к офицерам и не делайте резких движений!'
+        }
+    elseif kind == 'Велосипед' then
+        return {
+            '/m {target_driver}, немедленно остановитесь!',
+            '/m Сойдите с велосипеда и держите руки на виду!',
+            '/m Встаньте спиной к офицерам и не делайте резких движений!'
+        }
+    elseif kind == 'Мотоцикл' then
+        return {
+            '/m {target_driver}, немедленно остановитесь!',
+            '/m Заглушите двигатель и уберите руки с руля!',
+            '/m Медленно сойдите с мотоцикла с поднятыми руками!',
+            '/m Встаньте спиной к офицерам и не делайте резких движений!'
+        }
+    elseif kind == 'Автобус' then
+        return {
+            '/m {target_driver}, немедленно остановите автобус!',
+            '/m Заглушите двигатель и держите руки на виду!',
+            '/m Медленно выйдите из автобуса с поднятыми руками!',
+            '/m Встаньте спиной к офицерам и не делайте резких движений!'
+        }
+    end
+    local vehicleName = kind == 'Такси' and 'такси'
+        or (kind == 'Автомобиль' and 'автомобиля' or 'транспорта')
+    local engineInstruction = (kind == 'Автомобиль' or kind == 'Такси')
+        and '/m Заглушите двигатель, выньте ключи из замка зажигания и выбросьте их в окно!'
+        or '/m Остановитесь и держите руки на виду!'
+    return {
+        '/m {target_driver}, немедленно остановитесь!',
+        engineInstruction,
+        '/m Медленно выйдите из ' .. vehicleName .. ' с поднятыми руками!',
+        '/m Встаньте спиной к офицерам и не делайте резких движений!'
+    }
+end
+
 local function commandM55()
     if not getCharVehicleSafe(PLAYER_PED) then
         notify('Для использования мегафона сядьте в служебный транспорт.')
@@ -5886,12 +5996,8 @@ local function commandM55()
     refreshPatrolData()
     local targetVehicle = getNearestVehicle(80.0)
     local driverAddress = targetVehicle and getVehicleMegaphoneAddress(targetVehicle)
-        or 'Водитель автомобиля'
-    local lines = {
-        '/m Внимание! {target_driver}!',
-        '/m Прижмитесь к обочине и заглушите двигатель.',
-        '/m Оставайтесь в автомобиле, держите руки на руле и ожидайте.'
-    }
+        or 'Водитель транспортного средства'
+    local lines = getVehicleMegaphoneLines(targetVehicle, 55)
     appendAutomaticRadioReport(lines, "{surname_self} на CONTROL. Провожу '55 в районе {location}, С'4, недоступен.")
     if targetVehicle then appendAutomaticRadioReport(lines, '{target_report}') end
     runSequence('Мегафон 10-55', lines, { tokens = {
@@ -5908,13 +6014,8 @@ local function commandM66()
     refreshPatrolData()
     local targetVehicle = getNearestVehicle(80.0)
     local driverAddress = targetVehicle and getVehicleMegaphoneAddress(targetVehicle)
-        or 'Водитель автомобиля'
-    local lines = {
-        '/m {target_driver}, немедленно остановитесь!',
-        '/m Заглушите двигатель, выньте ключи из замка зажигания и выбросьте их в окно!',
-        '/m Медленно выйдите из автомобиля с поднятыми руками!',
-        '/m Встаньте спиной к офицерам и не делайте резких движений!'
-    }
+        or 'Водитель транспортного средства'
+    local lines = getVehicleMegaphoneLines(targetVehicle, 66)
     appendAutomaticRadioReport(lines, "{surname_self} на CONTROL. Провожу '66 в районе {location}, С'4, недоступен.")
     if targetVehicle then appendAutomaticRadioReport(lines, '{target_report}') end
     runSequence('Мегафон 10-66', lines, { tokens = {
