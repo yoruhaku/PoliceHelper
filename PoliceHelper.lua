@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '25092026_223226'
+LOCAL_VERSION = '26092026_044606'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -6070,9 +6070,10 @@ local helperCommandSections = {
         }
     },
     {
-        title = 'Старший состав',
+        title = 'Руководящий состав',
         rows = {
-            {'/drive 5-30', 'Для 9–10 рангов. Обратный отсчёт, затем серверный /drive; подтверждение остаётся за вами', '/drive 30'}
+            {'/drive 5-30', 'Для 9–10 рангов. Обратный отсчёт, затем серверный /drive; подтверждение остаётся за вами', '/drive 30'},
+            {'/changeskin ID', 'Выдать игроку комплект формы с RP-отыгровкой, затем сменить его форму', '/changeskin 15'}
         }
     },
     {
@@ -6662,6 +6663,20 @@ function commandChangeSkin(args)
             serverCommand('changeskin', validId)
         })
     end
+end
+
+function commandChangeSkinLeader(args)
+    local requested = trim(args)
+    if requested == '' then notify('Использование: /changeskin [ID]'); return end
+    local validId, nickname, err = getPlayerById(requested)
+    if not validId then notify(err); return end
+    runSequence('Выдача комплекта формы', {
+        '/do В руках заранее подготовленный комплект с формой.',
+        { wait = 777 },
+        '/me выдал пакет с формой для ' .. nickname,
+        { wait = 444 },
+        serverCommand('changeskin', validId)
+    })
 end
 
 function commandTakeDrugs()
@@ -8070,8 +8085,9 @@ editorCommandGroups = {
         {'r3', '', 'Запросить срочную поддержку'}, {'rstart', '', 'Начать патруль'},
         {'rpat', '', 'Передать статус патруля'}, {'rend', '', 'Закончить патруль'}
     }},
-    { title = 'Старший состав', items = {
-        {'drive', '5-30 секунд', 'Для 9–10 рангов: обратный отсчёт вызова эвакуатора'}
+    { title = 'Руководящий состав', items = {
+        {'drive', '5-30 секунд', 'Для 9–10 рангов: обратный отсчёт вызова эвакуатора'},
+        {'changeskin', 'ID', 'Выдать комплект формы с RP и сменить форму игроку'}
     }},
     { title = 'Команды МВД', items = {
         {'takelic', 'ID лицензия', 'Изъять лицензию'}, {'takefish', 'ID', 'Изъять рыбный улов'},
@@ -9073,6 +9089,7 @@ function main()
     registerSafeCommand('rang', commandRang)
     registerSafeCommand('offrang', commandOfflineRang)
     registerSafeCommand('cs', commandChangeSkin)
+    registerSafeCommand('changeskin', commandChangeSkinLeader)
     registerSafeCommand('nar', commandTakeDrugs)
     registerSafeCommand('pt', commandTakeAmmo)
     registerSafeCommand('bomb', commandDefuseBomb)
@@ -9136,7 +9153,8 @@ function main()
         takefish = commandTakeFish, skip = commandPass, ['break'] = commandBarrier,
         d = commandDepartmentDoors, invite = commandInvite, uninvite = commandUninvite,
         uninviteoff = commandUninviteOffline, rang = commandRang, offrang = commandOfflineRang,
-        cs = commandChangeSkin, nar = commandTakeDrugs, pt = commandTakeAmmo,
+        cs = commandChangeSkin, changeskin = commandChangeSkinLeader,
+        nar = commandTakeDrugs, pt = commandTakeAmmo,
         bomb = commandDefuseBomb,
         fo = commandFollowOn, foff = commandFollowOff, pp = commandPhoneAccept,
         hh = commandPhoneDecline, ln = commandLeaderOoc,
