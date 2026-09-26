@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '26092026_044606'
+LOCAL_VERSION = '26092026_045025'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -5984,7 +5984,7 @@ local serverCommandSections = {
             {'/uninviteoff Nick_Name причина', 'Уволить сотрудника, находящегося вне сети', '/uninviteoff Ivan_Ivanov По собственному желанию'},
             {'/rang ID +/-', 'Повысить или понизить ранг сотрудника', '/rang 15 +'},
             {'/offrang Nick_Name +/-', 'Изменить ранг сотрудника вне сети', '/offrang Ivan_Ivanov -'},
-            {'/cs [ID]', 'Без ID меняет собственную форму; с ID выдаёт форму указанному сотруднику', '/cs 15'}
+            {'/cs [ID]', 'Короткая версия /changeskin с той же RP-отыгровкой; без ID меняет свою форму', '/cs 15'}
         }
     },
     {
@@ -6073,7 +6073,7 @@ local helperCommandSections = {
         title = 'Руководящий состав',
         rows = {
             {'/drive 5-30', 'Для 9–10 рангов. Обратный отсчёт, затем серверный /drive; подтверждение остаётся за вами', '/drive 30'},
-            {'/changeskin ID', 'Выдать игроку комплект формы с RP-отыгровкой, затем сменить его форму', '/changeskin 15'}
+            {'/changeskin ID или /cs ID', 'Выдать игроку комплект формы с одинаковой RP-отыгровкой; /cs без ID – сменить свою форму', '/changeskin 15'}
         }
     },
     {
@@ -6642,41 +6642,37 @@ function commandOfflineRang(args)
     })
 end
 
+local function runChangeSkinRoleplay(validId, nickname)
+    local selfOk, selfId = sampGetPlayerIdByCharHandle(PLAYER_PED)
+    local action = selfOk and validId == selfId
+        and '/me взял пакет с формой для себя'
+        or '/me выдал пакет с формой для ' .. nickname
+    runSequence('Выдача комплекта формы', {
+        '/do В руках заранее подготовленный комплект с формой.',
+        { wait = 777 },
+        action,
+        { wait = 444 },
+        serverCommand('changeskin', validId)
+    })
+end
+
 function commandChangeSkin(args)
     local selfOk, selfId = sampGetPlayerIdByCharHandle(PLAYER_PED)
     if not selfOk then notify('Не удалось определить собственный ID.'); return end
     local requested = trim(args)
     local id = requested == '' and selfId or tonumber(requested)
     if not id then notify('Использование: /cs [ID]'); return end
-    local validId, _, err = getPlayerById(id)
+    local validId, nickname, err = getPlayerById(id)
     if not validId then notify(err); return end
-    if validId == selfId then
-        runSequence('Смена формы', {
-            '/do В служебном шкафчике находится комплект формы.',
-            '/me достал комплект формы, переоделся и аккуратно сложил прежнюю одежду',
-            serverCommand('changeskin', validId)
-        })
-    else
-        runSequence('Выдача формы сотруднику', {
-            '/do В руках находится подготовленный комплект служебной формы.',
-            '/me передал комплект формы сотруднику напротив',
-            serverCommand('changeskin', validId)
-        })
-    end
+    runChangeSkinRoleplay(validId, nickname)
 end
 
 function commandChangeSkinLeader(args)
     local requested = trim(args)
-    if requested == '' then notify('Использование: /changeskin [ID]'); return end
+    if requested == '' then notify('Использование: /changeskin [ID] или /cs [ID]'); return end
     local validId, nickname, err = getPlayerById(requested)
     if not validId then notify(err); return end
-    runSequence('Выдача комплекта формы', {
-        '/do В руках заранее подготовленный комплект с формой.',
-        { wait = 777 },
-        '/me выдал пакет с формой для ' .. nickname,
-        { wait = 444 },
-        serverCommand('changeskin', validId)
-    })
+    runChangeSkinRoleplay(validId, nickname)
 end
 
 function commandTakeDrugs()
@@ -8087,7 +8083,7 @@ editorCommandGroups = {
     }},
     { title = 'Руководящий состав', items = {
         {'drive', '5-30 секунд', 'Для 9–10 рангов: обратный отсчёт вызова эвакуатора'},
-        {'changeskin', 'ID', 'Выдать комплект формы с RP и сменить форму игроку'}
+        {'changeskin', 'ID', 'Выдать комплект формы с RP; короткая версия – /cs ID'}
     }},
     { title = 'Команды МВД', items = {
         {'takelic', 'ID лицензия', 'Изъять лицензию'}, {'takefish', 'ID', 'Изъять рыбный улов'},
@@ -8103,7 +8099,7 @@ editorCommandGroups = {
         {'invite', 'ID', 'Принять сотрудника'}, {'uninvite', 'ID причина', 'Уволить сотрудника'},
         {'uninviteoff', 'Nick_Name причина', 'Уволить сотрудника вне сети'},
         {'rang', 'ID +/-', 'Изменить ранг сотрудника'}, {'offrang', 'Nick_Name +/-', 'Изменить ранг вне сети'},
-        {'cs', '[ID]', 'Сменить свою форму или выдать форму сотруднику'}
+        {'cs', '[ID]', 'Короткая версия /changeskin с той же RP; без ID – своя форма'}
     }},
     { title = 'ФБР и улики', items = {
         {'fo', '', 'Подключить прослушивание'}, {'foff', '', 'Отключить прослушивание'},
