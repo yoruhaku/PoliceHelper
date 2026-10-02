@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '26092026_053254'
+LOCAL_VERSION = '02102026_181341'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -966,7 +966,7 @@ roleplayCatalog = {
     { name = 'su', title = '/su, /sus – выдать розыск', body = '/me внёс данные подозреваемого в базу розыска' },
     { name = 'gpson', title = '/gpson – активировать GPS-трекер', body = '/me нажал кнопку на часах и активировал GPS-трекер' },
     { name = 'ticket', title = '/ticket, /tick – выписать штраф', body = '/me достал бланк штрафной квитанции и ручку.\n/me заполнил сведения о нарушителе, сумму и основание штрафа.\n/do В квитанции указаны сумма {cmd_amount}$ и причина: {cmd_reason}.' },
-    { name = 'takelic', title = '/takelic – изъять лицензию', body = '/me открыл базу МВД и ввёл номер водительского удостоверения нарушителя\n/me указал причину аннулирования водительских прав: {cmd_reason}' },
+    { name = 'takelic', title = '/takelic – изъять лицензию', body = '/me открыл базу МВД и выбрал запись лицензии нарушителя\n/me указал причину аннулирования {cmd_license}: {cmd_reason}' },
     { name = 'skip', title = '/skip – выдать пропуск', body = '/me достал чистый бланк пропуска в здания МВД и ручку\n/me заполнил пропуск и передал его владельцу' },
     { name = 'takefish', title = '/takefish – изъять улов', body = '/me осмотрел рыбный улов и проверил основания для его изъятия' },
     { name = 'break', title = '/break – установить ограждение', body = '/me достал служебное ограждение и установил его на выбранном месте' },
@@ -1003,7 +1003,7 @@ roleplaySequenceKeys = {
     ['Посадка в автомобиль'] = 'putpl', ['Высадка из транспорта'] = 'pull', ['Обыск'] = 'search',
     ['Арест'] = 'arrest', ['Снятие розыска'] = 'clear', ['Выдача розыска'] = 'su',
     ['Объявление в розыск'] = 'su', ['Оформление штрафа'] = 'ticket',
-    ['Изъятие водительских прав'] = 'takelic', ['Выдача пропуска'] = 'skip',
+    ['Изъятие водительских прав'] = 'takelic', ['Изъятие лицензии'] = 'takelic', ['Выдача пропуска'] = 'skip',
     ['Проверка рыбного улова'] = 'takefish', ['Установка ограждения'] = 'break',
     ['Принятие сотрудника'] = 'invite', ['Увольнение сотрудника'] = 'uninvite',
     ['Офлайн-увольнение сотрудника'] = 'uninvite', ['Изменение ранга сотрудника'] = 'rang',
@@ -1815,8 +1815,13 @@ function handleServerMessageEvent(color, text)
     local sharedCaseId, sharedCaseName, sharedActor = clean:match(
         '^На дисплее данные и координаты дела №(%d+)%s*[%-%–]%s*(.-)%.%s*%(([%w_]+)%)$'
     )
+    if not sharedCaseId then
+        sharedActor, sharedCaseName, sharedCaseId = clean:match(
+            '^([%w_]+) потянулся к планшету, ввёл запрос:%s*(.-)%s*%[Дело №(%d+)%]%.?$'
+        )
+    end
     sharedCaseId = tonumber(sharedCaseId)
-    if sharedCaseId and sharedCaseId ~= trackedTargetId
+    if sharedCaseId
         and sampIsPlayerConnected(sharedCaseId)
         and isTrackingOfferFromOtherOfficer(sharedActor)
     then
@@ -4815,7 +4820,7 @@ e) при проведении контртеррористической операции, проверке сведений об обнаружен
 /pull - вытащить игрока из автомобиля
 /break - установить ограждение(во время глобальных РП ситуаций и РП ситуаций с мафией)
 /ticket - выписать штраф
-/takelic - отобрать водительскую лицензию
+/takelic - изъять транспортную лицензию или лицензию на ловлю рыбы
 /wanted - открыть список разыскиваемых игроков
 /setmark - начать отслеживание игрока в розыске (по id)
 /arrest - отправить преступника в тюрьму
@@ -6067,7 +6072,7 @@ local serverCommandSections = {
             {'/signal [аргументы]', 'Установить сигнализацию в бизнесе по заявке владельца', '/signal'},
             {'/skip ID', 'Выдать пропуск на объект с ограниченным доступом', '/skip 15'},
             {'/su ID 1-6 причина', 'Объявить игрока в розыск', '/su 15 2 6.1 УК'},
-            {'/takelic ID причина', 'Изъять лицензию на управление транспортом', '/takelic 15 Решение суда'},
+            {'/takelic ID тип причина', 'Изъять лицензию: 1 – транспорт, 2 – ловля рыбы; причина обязательна', '/takelic 15 1 Решение суда'},
             {'/takefish ID', 'Проверить и изъять рыбный улов; RP выполняется автоматически', '/takefish 15'},
             {'/ticket ID сумма причина', 'Например: 2.5 АК – штраф 25к', '/ticket 15 25000 2.5 АК'},
             {'/tow [аргументы]', 'Эвакуировать ближайший автомобиль', '/tow'},
@@ -6501,8 +6506,8 @@ end
 
 function commandTrafficStopContact()
     runSequence('Контакт с водителем', {
-        '/me медленно подошёл к автомобилю и оставил отпечаток руки на задней фаре',
-        '/me постучал в водительское окно автомобиля',
+        '/me медленно подошёл к ТС и оставил отпечаток руки на задней фаре',
+        '/me постучал в водительское окно ТС',
         '/do Водительское окно открыто?'
     })
 end
@@ -6516,13 +6521,20 @@ function commandRequestPassportAndLicense()
 end
 
 local function commandTakeLicense(args)
-    local id, reason = trim(args):match('^(%d+)%s+(.+)$')
-    if not id then notify('Использование: /takelic [ID] [причина]'); return end
-    runSequence('Изъятие водительских прав', {
-        '/me открыл базу МВД и ввёл номер водительского удостоверения нарушителя',
-        '/me указал причину аннулирования водительских прав: {cmd_reason}',
-        '/takelic {id} {cmd_reason}'
-    }, { targetId = tonumber(id), tokens = { ['{cmd_reason}'] = trim(reason) } })
+    local id, licenseType, reason = trim(args):match('^(%d+)%s+([12])%s+(.+)$')
+    if not id or trim(reason) == '' then
+        notify('Использование: /takelic [ID] [тип лицензии] [причина]. Типы: 1 – транспорт, 2 – ловля рыбы.')
+        return
+    end
+    runSequence('Изъятие лицензии', {
+        '/me открыл базу МВД и выбрал запись лицензии нарушителя',
+        '/me указал причину аннулирования {cmd_license}: {cmd_reason}',
+        '/takelic {id} {cmd_license_type} {cmd_reason}'
+    }, { targetId = tonumber(id), tokens = {
+        ['{cmd_license_type}'] = licenseType,
+        ['{cmd_license}'] = licenseType == '1' and 'транспортной лицензии' or 'лицензии на ловлю рыбы',
+        ['{cmd_reason}'] = trim(reason)
+    } })
 end
 
 local function commandPass(args)
@@ -8187,7 +8199,7 @@ editorCommandGroups = {
         {'changeskin', 'ID', 'Выдать комплект формы с RP; короткая версия – /cs ID'}
     }},
     { title = 'Команды МВД', items = {
-        {'takelic', 'ID лицензия', 'Изъять лицензию'}, {'takefish', 'ID', 'Изъять рыбный улов'},
+        {'takelic', 'ID тип причина', 'Изъять лицензию: 1 – транспорт, 2 – ловля рыбы'}, {'takefish', 'ID', 'Изъять рыбный улов'},
         {'skip', 'ID', 'Выдать пропуск'}, {'break', '', 'Установить ограждение'},
         {'d', '', 'Открыть или закрыть дверь управления'}, {'form', '', 'Управлять доступом к форме'},
         {'jailcam', '', 'Открыть камеры тюремного блока'}, {'jaildoor', '', 'Управлять дверями камер'},
@@ -9412,7 +9424,9 @@ function main()
                     sharedTrackingOfferId = -1
                     sharedTrackingOfferName = ''
                     sharedTrackingOfferUntil = 0.0
-                    if trackedTargetId >= 0 and trackingConfirmed and trackedTargetId ~= offerId then
+                    if trackedTargetId == offerId and trackingConfirmed then
+                        notify('Дело №' .. offerId .. ' уже отслеживается. Текущая метка сохранена.')
+                    elseif trackedTargetId >= 0 and trackingConfirmed then
                         sharedTrackingSwitchId = offerId
                         sharedTrackingSwitchName = offerName
                         sharedTrackingSwitchUntil = os.clock() + 15.0
