@@ -15,11 +15,11 @@ local new = imgui.new
 local CONFIG_NAME = 'PoliceHelper'
 local CONFIG_PATH = getWorkingDirectory() .. '\\config\\' .. CONFIG_NAME .. '.ini'
 local CHAT_PREFIX = '{3A86FF}[PoliceHelper] {FFFFFF}'
-local WINDOW_TITLE = 'PoliceHelper | Создано с любовью от Ravenhush Ashbluff <3'
+local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '02102026_181341'
+LOCAL_VERSION = '07102026_221712'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -6050,47 +6050,61 @@ local inputLine
 
 local serverCommandSections = {
     {
-        title = 'Команды МВД',
+        title = 'Задержание, розыск и штрафы',
         rows = {
-            {'/arrest ID причина', 'Передать игрока в участок; RP выполняется автоматически', '/arrest 15 3.1 УК'},
-            {'/break [аргументы]', 'Выставить или убрать служебное ограждение', '/break'},
-            {'/clear ID причина', 'Снять розыск; RP выполняется автоматически, без доклада в /f', '/clear 15 Ошибка'},
-            {'/cuff ID', 'Надеть наручники; RP выполняется автоматически', '/cuff 15'},
-            {'/d', 'Открыть или закрыть дверь; RP выполняется после ответа сервера', '/d'},
-            {'/form', 'Включить или отключить возможность менять форму', '/form'},
-            {'/hold ID', 'Вести задержанного за собой', '/hold 15'},
-            {'/jailcam', 'Открыть камеры видеонаблюдения в тюрьме', '/jailcam'},
-            {'/jaildoor', 'Управлять дверьми тюремных камер', '/jaildoor'},
-            {'/m текст', 'Использовать серверный мегафон без дополнительной RP-строки', '/m Прижмитесь к обочине!'},
-            {'/mask', 'Надеть маску; RP выполняется автоматически', '/mask'},
-            {'/healme', 'Команда отправляется сразу; RP только после успешного лечения', '/healme'},
-            {'/open [аргументы]', 'RP и серверная команда отправляются сразу без задержки', '/open'},
-            {'/pull ID', 'Вытащить игрока из транспорта', '/pull 15'},
-            {'/putpl ID', 'Посадить задержанного в патрульную машину', '/putpl 15'},
-            {'/search ID основание', '1 – Первичный, 2 – Полный; иной текст передаётся как есть', '/search 15 1'},
-            {'/setmark ID', 'Команда отправляется сразу; RP только после успешного обнаружения', '/setmark 15'},
-            {'/signal [аргументы]', 'Установить сигнализацию в бизнесе по заявке владельца', '/signal'},
-            {'/skip ID', 'Выдать пропуск на объект с ограниченным доступом', '/skip 15'},
-            {'/su ID 1-6 причина', 'Объявить игрока в розыск', '/su 15 2 6.1 УК'},
+            {'/cuff ID', 'Надеть наручники; RP после подтверждения сервера', '/cuff 15', '/cf ID'},
+            {'/hold ID', 'Вести задержанного; RP после подтверждения сервера', '/hold 15', '/hd ID'},
+            {'/search ID основание', 'Обыск: 1 – Первичный, 2 – Полный; можно указать своё основание', '/search 15 1', '/se ID основание'},
+            {'/putpl ID', 'Посадить задержанного в машину; завершение RP после подтверждения сервера', '/putpl 15', '/pl ID'},
+            {'/su ID 1-6 причина', 'Объявить в розыск; RP после подтверждения сервера. /sus – умный выбор по номеру или тексту статьи', '/su 15 3 9.1 УК\n/sus 15 неподч', '/sus ID [поиск]'},
+            {'/ticket ID сумма причина', 'Выписать штраф. /tick – умный выбор статьи и суммы с поиском', '/ticket 15 25000 2.5 АК\n/tick 15 встреч', '/tick ID [поиск]'},
+            {'/uncuff ID', 'Снять наручники; RP после подтверждения сервера', '/uncuff 15'},
+            {'/pull ID', 'Вытащить игрока из транспорта; завершение RP после подтверждения сервера', '/pull 15'},
+            {'/arrest ID причина', 'Передать игрока в участок для отбывания наказания', '/arrest 15 3.1 УК'},
+            {'/y ID', 'Включить режим задержания; RP после подтверждения сервера', '/y 15'},
+            {'/wanted [1/2]', 'Список розыска: 1 – игроки, 2 – транспорт; без аргумента – игроки', '/wanted 1', '/wd [1/2]'},
+            {'/setmark ID', 'Отследить игрока; команда сразу, RP после успешного обнаружения', '/setmark 15', '/sm ID'},
+            {'/history Nick_Name', 'Проверить историю персонажа; /his принимает ID вместо ника', '/his 15', '/his ID'},
+            {'/clear ID причина', 'Снять розыск без доклада в /f', '/clear 15 Ошибка'},
             {'/takelic ID тип причина', 'Изъять лицензию: 1 – транспорт, 2 – ловля рыбы; причина обязательна', '/takelic 15 1 Решение суда'},
-            {'/takefish ID', 'Проверить и изъять рыбный улов; RP выполняется автоматически', '/takefish 15'},
-            {'/ticket ID сумма причина', 'Например: 2.5 АК – штраф 25к', '/ticket 15 25000 2.5 АК'},
-            {'/tow [аргументы]', 'Эвакуировать ближайший автомобиль', '/tow'},
-            {'/uncuff ID', 'Снять наручники', '/uncuff 15'},
-            {'/unmask ID', 'Снять маску с игрока; RP выполняется после подтверждения сервера', '/unmask 15'},
-            {'/wanted [1/2]', 'Игроки или транспорт; без аргумента открывается список игроков', '/wanted 1'},
+            {'/unmask ID', 'Снять чужую маску; RP после подтверждения сервера', '/unmask 15'},
+            {'/takefish ID', 'Проверить и изъять рыбный улов', '/takefish 15'},
             {'/wantedcar аргументы', 'Объявить транспорт в розыск', '/wantedcar 411'}
+        }
+    },
+    {
+        title = 'Транспорт и снаряжение',
+        rows = {
+            {'/m текст', 'Передать требование через мегафон', '/m Прижмитесь к обочине!'},
+            {'/mask', 'Надеть маску; RP после подтверждения сервера', '/mask'},
+            {'/healme', 'Использовать аптечку; команда сразу, RP после успешного лечения', '/healme'},
+            {'/fix', 'Использовать ремкомплект', '/fix'},
+            {'/eject ID', 'Высадить человека из своего транспорта', '/eject 15'},
+            {'/tow [аргументы]', 'Эвакуировать ближайший автомобиль', '/tow'},
+            {'/break [аргументы]', 'Выставить или убрать служебное ограждение', '/break'}
+        }
+    },
+    {
+        title = 'Служебные объекты',
+        rows = {
+            {'/d', 'Управлять дверью управления; RP после ответа сервера', '/d'},
+            {'/open [аргументы]', 'Управлять шлагбаумом; команда отправляется сразу', '/open'},
+            {'/jaildoor', 'Управлять дверьми тюремных камер', '/jaildoor'},
+            {'/jailcam', 'Открыть камеры видеонаблюдения в тюрьме', '/jailcam'},
+            {'/skip ID', 'Выдать пропуск на объект с ограниченным доступом', '/skip 15'},
+            {'/signal [аргументы]', 'Установить сигнализацию в бизнесе по заявке владельца', '/signal'},
+            {'/form', 'Включить или отключить возможность менять форму', '/form'}
         }
     },
     {
         title = 'Кадровая работа',
         rows = {
-            {'/invite ID', 'Принять игрока в организацию; RP выполняется автоматически', '/invite 15'},
+            {'/invite ID', 'Принять игрока в организацию', '/invite 15'},
             {'/uninvite ID причина', 'Уволить находящегося в сети сотрудника', '/uninvite 15 По собственному желанию'},
             {'/uninviteoff Nick_Name причина', 'Уволить сотрудника, находящегося вне сети', '/uninviteoff Ivan_Ivanov По собственному желанию'},
             {'/rang ID +/-', 'Повысить или понизить ранг сотрудника', '/rang 15 +'},
             {'/offrang Nick_Name +/-', 'Изменить ранг сотрудника вне сети', '/offrang Ivan_Ivanov -'},
-            {'/cs [ID]', 'Короткая версия /changeskin с той же RP-отыгровкой; без ID меняет свою форму', '/cs 15'}
+            {'/changeskin ID', 'Выдать комплект формы игроку; /cs без ID – сменить свою форму', '/changeskin 15', '/cs [ID]'}
         }
     },
     {
@@ -6100,33 +6114,18 @@ local serverCommandSections = {
             {'/follow [аргументы]', 'Включить или отключить режим прослушивания', '/follow'},
             {'/hack [аргументы]', 'Попытаться вскрыть дверь дома', '/hack'},
             {'/names [аргументы]', 'Посмотреть историю имён прикрытия', '/names'},
-            {'/untie [ID]', 'Освободить заложника', '/untie 15'},
-            {'/y ID', 'Активировать режим задержания игрока', '/y 15'}
+            {'/untie [ID]', 'Освободить заложника', '/untie 15'}
         }
     }
 }
 
 local helperCommandSections = {
     {
-        title = 'Сокращённые команды',
-        rows = {
-            {'/sp текст или команда', 'Отправить всё после /sp напрямую, без RP-обработчика PoliceHelper', '/sp /cuff 15'},
-            {'/cf ID', 'Короткая версия /cuff с полной RP-логикой', '/cf 15'},
-            {'/uncf ID', 'Мгновенно: /uncuff, /cuff и OOC-откат без RP-отыгровок', '/uncf 15'},
-            {'/hd ID', 'Короткая версия /hold с полной RP-логикой', '/hd 15'},
-            {'/pl ID', 'Короткая версия /putpl с полной RP-логикой', '/pl 15'},
-            {'/se ID основание', 'Короткая версия /search; 1 – Первичный, 2 – Полный', '/se 15 2'},
-            {'/wd [1/2]', 'Короткая версия /wanted', '/wd 1'},
-            {'/sm ID', 'Короткая версия /setmark; отправляется без задержки', '/sm 15'}
-        }
-    },
-    {
         title = 'Задержание и документы',
         rows = {
             {'/udo', 'Представиться и показать удостоверение', '/udo'},
             {'/prava', 'Зачитать задержанному его права', '/prava'},
-            {'/eject ID', 'Высадить человека из транспорта с RP', '/eject 15'},
-            {'/hist ID', 'Проверить историю персонажа', '/hist 15'},
+            {'/uncf ID', 'Мгновенно снять и снова надеть наручники, затем отправить OOC-откат', '/uncf 15'},
             {'/krik', 'Громко потребовать оставаться на месте', '/krik'},
             {'/bc', 'Включить или выключить нагрудную камеру', '/bc'},
             {'/gpson', 'Объявить себя в розыск на 3 степени: GPS-трекер', '/gpson'},
@@ -6149,12 +6148,10 @@ local helperCommandSections = {
         }
     },
     {
-        title = 'Умный розыск и штрафы',
+        title = 'Быстрый розыск и штрафы',
         rows = {
             {'/pg ID', 'Быстро: 9.1 УК – неподчинение, 3 уровень розыска', '/pg 15'},
             {'/vn ID', 'Быстро: 2.1 УК – вооружённое нападение, 6 уровень розыска', '/vn 15'},
-            {'/sus ID [поиск]', 'Поиск необязателен. 9.1 УК – 3 уровень розыска', '/sus 15 9.1'},
-            {'/tick ID [поиск]', 'Поиск необязателен. 2.5 АК – штраф 25к', '/tick 15 2.5'},
             {'/vstr ID', 'Быстрый штраф за движение по встречной полосе: 2.5 АК – 25к', '/vstr 15'}
         }
     },
@@ -6176,13 +6173,6 @@ local helperCommandSections = {
         }
     },
     {
-        title = 'Руководящий состав',
-        rows = {
-            {'/drive 5-30', 'Для 9–10 рангов. Обратный отсчёт, затем серверный /drive; подтверждение остаётся за вами', '/drive 30'},
-            {'/changeskin ID или /cs ID', 'Выдать игроку комплект формы с одинаковой RP-отыгровкой; /cs без ID – сменить свою форму', '/changeskin 15'}
-        }
-    },
-    {
         title = 'Управление PoliceHelper',
         rows = {
             {'/ph', 'Открыть или закрыть главное окно', '/ph'},
@@ -6190,6 +6180,7 @@ local helperCommandSections = {
             {'Настроенная клавиша окна', 'Открыть или закрыть главное окно', 'По умолчанию P + O'},
             {'Настроенная клавиша', 'Удерживать для меню быстрого доступа; отпускание закрывает его', 'По умолчанию X'},
             {'/phsync', 'Повторно получить профиль через серверную статистику', '/phsync'},
+            {'/sp текст или команда', 'Отправить текст или команду напрямую', '/sp /cuff 15'},
             {'/nanim [1-8]', 'Открыть окно или сразу запустить выбранную анимацию', '/nanim 1'}
         }
     }
@@ -6404,7 +6395,7 @@ local function commandWanted(args)
 end
 
 local function commandHistory(args)
-    local id = parseIdOnly(args, '/hist [ID]')
+    local id = parseIdOnly(args, '/his [ID]')
     if not id then return end
     local ok, nickname = pcall(sampGetPlayerNickname, id)
     if not ok or not nickname or nickname == '' then notify('Не удалось получить ник игрока.'); return end
@@ -7231,19 +7222,33 @@ local function drawCommandRows(rows)
     end
 end
 
-local function drawDetailedCommandRows(rows, id)
-    imgui.Columns(3, id, false)
-    imgui.SetColumnWidth(0, 175)
-    imgui.SetColumnWidth(1, 350)
-    imgui.TextDisabled(u8'Команда и аргументы')
+local function drawDetailedCommandRows(rows, id, showShortcuts)
+    local width = imgui.GetContentRegionAvail().x
+    imgui.Columns(showShortcuts and 4 or 3, id, false)
+    imgui.SetColumnWidth(0, width * (showShortcuts and 0.23 or 0.26))
+    imgui.SetColumnWidth(1, width * (showShortcuts and 0.18 or 0.44))
+    if showShortcuts then imgui.SetColumnWidth(2, width * 0.35) end
+    imgui.TextDisabled(u8'Команда')
     imgui.NextColumn()
-    imgui.TextDisabled(u8'Описание и подсказка')
+    if showShortcuts then
+        imgui.TextDisabled(u8'Сокращения')
+        imgui.NextColumn()
+    end
+    imgui.TextDisabled(u8'Описание')
     imgui.NextColumn()
     imgui.TextDisabled(u8'Пример')
     imgui.NextColumn()
     for _, row in ipairs(rows) do
-        imgui.TextColored(imgui.ImVec4(0.25, 0.82, 0.48, 1.0), u8(row[1]))
+        imgui.PushStyleColor(imgui.Col.Text, imgui.ImVec4(0.25, 0.82, 0.48, 1.0))
+        policeHelperSafeWrappedText(row[1])
+        imgui.PopStyleColor()
         imgui.NextColumn()
+        if showShortcuts then
+            imgui.PushStyleColor(imgui.Col.Text, imgui.ImVec4(0.42, 0.72, 1.0, 1.0))
+            policeHelperSafeWrappedText(row[4] or '–')
+            imgui.PopStyleColor()
+            imgui.NextColumn()
+        end
         policeHelperSafeWrappedText(row[2])
         imgui.NextColumn()
         policeHelperSafeWrappedText(row[3])
@@ -7286,7 +7291,7 @@ function drawCenteredTabs(labels, selected, idPrefix, width)
 end
 
 local function drawCommands()
-    drawPageHeader('Команды', 'Серверные возможности и автоматизированные RP-команды PoliceHelper')
+    drawPageHeader('Команды', 'Команды сервера, сокращения и дополнительные возможности PoliceHelper')
     commandListMode = drawCenteredTabs({ 'Серверные команды', 'Команды PoliceHelper' }, commandListMode, 'commandMode', 230)
     imgui.Spacing()
     local interviewButtonWidth = 300
@@ -7305,7 +7310,8 @@ local function drawCommands()
     for index, block in ipairs(sections) do
         imgui.SetNextItemOpen(true, imgui.Cond.Once)
         if imgui.CollapsingHeader(u8(block.title .. '##commandBlock' .. index)) then
-            drawDetailedCommandRows(block.rows, '##commandColumns' .. commandListMode .. '_' .. index)
+            drawDetailedCommandRows(block.rows, '##commandColumns' .. commandListMode .. '_' .. index,
+                commandListMode == 1)
             imgui.Dummy(imgui.ImVec2(0, 7))
         end
     end
@@ -7458,7 +7464,7 @@ function drawCheck()
     end
 
     section('Информационные команды')
-    if wideButton('/hist ID', 175) then
+    if wideButton('/his ID', 175) then
         local id, _, err = getTarget()
         if id then commandHistory(tostring(id)) else notify(err or 'Сначала выберите игрока.') end
     end
@@ -7631,8 +7637,7 @@ function drawArticleSelector(kind)
     if imgui.Begin(u8(title), open, imgui.WindowFlags.NoCollapse) then
         imgui.TextWrapped(u8('Игрок: ' .. nickname .. ' [' .. id .. ']. Поиск необязателен: команда только с ID открывает полный список.'))
         imgui.SetNextItemWidth(-1)
-        local filterHint = isWanted and 'Например: 9.1 УК – 3 уровень розыска'
-            or 'Например: 2.5 АК – штраф 25к'
+        local filterHint = isWanted and 'неподч' or 'встреч'
         imgui.InputTextWithHint('##articleFilter', u8(filterHint), queryBuf, ffi.sizeof(queryBuf))
         imgui.Spacing()
 
@@ -8180,7 +8185,7 @@ editorCommandGroups = {
         {'clear', 'ID причина', 'Снять розыск'}, {'ticket', 'ID сумма причина', 'Выписать штраф'},
         {'tick', 'ID [поиск]', 'Умный выбор штрафа АК'}, {'vstr', 'ID', 'Штраф 25.000$ за встречную полосу – 2.5 АК'},
         {'wanted', '[1 или 2]', 'Открыть список розыска'}, {'setmark', 'ID', 'Отследить игрока'},
-        {'hist', 'ID', 'Посмотреть историю игрока'}, {'wantedcar', '', 'Работа с розыском транспорта'},
+        {'his', 'ID', 'Посмотреть историю игрока'}, {'wantedcar', '', 'Работа с розыском транспорта'},
         {'gpson', '', 'Активировать GPS-трекер'}, {'gpsoff', '', 'Отключить GPS-трекер'},
         {'sos', '', 'Активировать тревожную кнопку'}, {'sosoff', '', 'Отменить тревогу'}
     }},
@@ -8193,10 +8198,6 @@ editorCommandGroups = {
         {'r4', '', 'Передать состав и состояние 10-4'}, {'r20', '', 'Передать текущее местоположение'},
         {'r3', '', 'Запросить срочную поддержку'}, {'rstart', '', 'Начать патруль'},
         {'rpat', '', 'Передать статус патруля'}, {'rend', '', 'Закончить патруль'}
-    }},
-    { title = 'Руководящий состав', items = {
-        {'drive', '5-30 секунд', 'Для 9–10 рангов: обратный отсчёт вызова эвакуатора'},
-        {'changeskin', 'ID', 'Выдать комплект формы с RP; короткая версия – /cs ID'}
     }},
     { title = 'Команды МВД', items = {
         {'takelic', 'ID тип причина', 'Изъять лицензию: 1 – транспорт, 2 – ловля рыбы'}, {'takefish', 'ID', 'Изъять рыбный улов'},
@@ -8212,7 +8213,9 @@ editorCommandGroups = {
         {'invite', 'ID', 'Принять сотрудника'}, {'uninvite', 'ID причина', 'Уволить сотрудника'},
         {'uninviteoff', 'Nick_Name причина', 'Уволить сотрудника вне сети'},
         {'rang', 'ID +/-', 'Изменить ранг сотрудника'}, {'offrang', 'Nick_Name +/-', 'Изменить ранг вне сети'},
-        {'cs', '[ID]', 'Короткая версия /changeskin с той же RP; без ID – своя форма'}
+        {'cs', '[ID]', 'Короткая версия /changeskin; без ID – своя форма'},
+        {'changeskin', 'ID', 'Выдать комплект формы; короткая версия – /cs ID'},
+        {'drive', '5-30 секунд', 'Для 9–10 рангов: обратный отсчёт вызова эвакуатора'}
     }},
     { title = 'ФБР и улики', items = {
         {'fo', '', 'Подключить прослушивание'}, {'foff', '', 'Отключить прослушивание'},
@@ -8732,7 +8735,7 @@ imgui.OnFrame(
         imgui.SetNextWindowSize(imgui.ImVec2(1080, 680), imgui.Cond.FirstUseEver)
         local display = imgui.GetIO().DisplaySize
         imgui.SetNextWindowPos(imgui.ImVec2(display.x * 0.5, display.y * 0.5),
-            imgui.Cond.Always, imgui.ImVec2(0.5, 0.5))
+            imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
         local flags = imgui.WindowFlags.NoCollapse
         if imgui.Begin(u8(WINDOW_TITLE), window, flags) then
             drawSidebar()
@@ -8793,9 +8796,9 @@ quickActionPages = {
         { id = 'bodycam', label = 'Боди-камера', action = commandBodycam }
     },
     command_input = {
-        { id = 'input_cf', label = 'Ввести /cf', action = function() openCommandInput('/cf') end },
-        { id = 'input_hd', label = 'Ввести /hd', action = function() openCommandInput('/hd') end },
-        { id = 'input_pl', label = 'Ввести /pl', action = function() openCommandInput('/pl') end },
+        { id = 'input_cf', label = 'Ввести /cuff', action = function() openCommandInput('/cuff') end },
+        { id = 'input_hd', label = 'Ввести /hold', action = function() openCommandInput('/hold') end },
+        { id = 'input_pl', label = 'Ввести /putpl', action = function() openCommandInput('/putpl') end },
         { id = 'input_pg', label = 'Ввести /pg', action = function() openCommandInput('/pg') end },
         { id = 'input_vn', label = 'Ввести /vn', action = function() openCommandInput('/vn') end },
         { id = 'input_y', label = 'Ввести /y', action = function() openCommandInput('/y') end }
@@ -9184,7 +9187,7 @@ function main()
     registerSafeCommand('eject', commandEject)
     registerSafeCommand('wanted', commandWanted)
     registerSafeCommand('wd', commandWanted)
-    registerSafeCommand('hist', commandHistory)
+    registerSafeCommand('his', commandHistory)
     registerSafeCommand('y', commandDetentionMode)
     registerSafeCommand('krik', commandShout)
     registerSafeCommand('takelic', commandTakeLicense)
@@ -9257,7 +9260,7 @@ function main()
         m55 = commandM55, m66 = commandM66, pr = commandStopChase,
         dk = commandMegaphoneRoadCode, proc = commandMegaphoneProcedure,
         dor = commandMegaphoneYieldRoad, sm = commandSetmark, setmark = commandSetmark,
-        eject = commandEject, wanted = commandWanted, wd = commandWanted, hist = commandHistory,
+        eject = commandEject, wanted = commandWanted, wd = commandWanted, his = commandHistory,
         y = commandDetentionMode, krik = commandShout, takelic = commandTakeLicense,
         takefish = commandTakeFish, skip = commandPass, ['break'] = commandBarrier,
         d = commandDepartmentDoors, invite = commandInvite, uninvite = commandUninvite,
