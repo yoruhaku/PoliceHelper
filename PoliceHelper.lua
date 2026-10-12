@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '12102026_210807'
+LOCAL_VERSION = '12102026_213438'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -2599,7 +2599,7 @@ local function splitLongText(text, limit)
 end
 
 local splitCommands = {
-    n = true, s = true, a = true, f = true, fn = true,
+    n = true, s = true, f = true, fn = true,
     j = true, jn = true, r = true, rn = true, m = true
 }
 
@@ -2615,8 +2615,6 @@ local function prepareMessageParts(message)
         limit = 72
     elseif command and splitCommands[command] then
         limit = 100
-    elseif not command and message:sub(1, 1) ~= '/' then
-        body, limit = message, 90
     else
         return { message }
     end
@@ -2647,12 +2645,9 @@ policeHelperTextSendBusy = false
 
 function policeHelperTextSpec(message)
     local command, body = tostring(message or ''):match('^/(%a+)%s+(.+)$')
-    if not command then
-        if tostring(message):sub(1, 1) == '/' then return nil end
-        return { command = '', body = tostring(message), limit = 90 }
-    end
+    if not command then return nil end
     command = command:lower()
-    if not splitCommands[command] and command ~= 't' then return nil end
+    if not splitCommands[command] then return nil end
     local limit = 90
     if command == 'r' or command == 'f' then limit = 74 end
     -- OOC-обрамление и заголовок канала оставляют меньше места для текста.
@@ -2709,32 +2704,34 @@ function policeHelperConfirmText(clean, playerId, fromBuffer)
         return
     end
     local posted
-    if playerId ~= nil and playerId == state.id
-        and (state.command == '' or state.wire:sub(1, #clean) == clean) then
+    if playerId ~= nil and playerId == state.id and state.wire:sub(1, #clean) == clean then
         posted = clean
     else
         -- Форматированная строка может прийти как через CLIENTMESSAGE, так и через CHAT.
         -- Для неё определяем автора по серверному заголовку, а не по типу RPC.
         local escaped = state.nickname:gsub('([^%w])', '%%%1')
-        local start, finish = clean:find(escaped .. '%[' .. state.id .. '%]:%s*')
-        if not start then start, finish = clean:find(escaped .. ':%s*') end
+        local start, finish
+        if state.command == 's' then
+            start, finish = clean:find(escaped .. '%[' .. state.id .. '%]%s+крикнул:%s*')
+        else
+            start, finish = clean:find(escaped .. '%[' .. state.id .. '%]:%s*')
+            if not start then start, finish = clean:find(escaped .. ':%s*') end
+        end
         if start then
             local header = clean:sub(1, start - 1)
             if header:find(':', 1, true) then return end
-            local channels = { r = 'R', rn = 'RN', f = 'F', fn = 'FN', j = 'J', jn = 'JN', a = 'A' }
+            local channels = { r = 'R', rn = 'RN', f = 'F', fn = 'FN', j = 'J', jn = 'JN' }
             local channel = channels[state.command]
             if channel and not header:find('[' .. channel .. ']', 1, true) then return end
             if state.command == 'm' and not header:find('<<', 1, true) then return end
-            if state.command == '' and header:find('[', 1, true) then return end
             if state.command == 'n' and not header:find('((', 1, true) then return end
+            if state.command == 'n' and header:find('[', 1, true) then return end
             posted = clean:sub(finish + 1)
-            if state.command == 'm' then posted = posted:gsub('%s*>>$', '') end
+            -- При обрезании серверное обрамление мегафона может закончиться одним >.
+            if state.command == 'm' then posted = posted:gsub('%s+>>?%s*$', '') end
             if state.command == 'n' or state.command == 'rn' or state.command == 'fn' or state.command == 'jn' then
                 posted = posted:gsub('%s*%)%)$', '')
             end
-        elseif state.command == '' then
-            local markerStart = clean:find('%(' .. escaped .. '%)%[' .. state.id .. '%]')
-            if markerStart then posted = trim(clean:sub(1, markerStart - 1)):gsub('^%-%s*', '') end
         end
     end
     if not posted then return end
@@ -2745,8 +2742,10 @@ function policeHelperConfirmText(clean, playerId, fromBuffer)
     if #posted < math.min(12, #state.wire) or state.wire:sub(1, #posted) ~= posted then return end
     local accepted = #posted - #state.lead
     if accepted < 1 or accepted > #state.piece then return end
-    if state.command == 'rn' and not fromBuffer and type(sampGetChatString) == 'function' then
-        -- Для RN сверяем отображённую строку: RPC может содержать больше, чем вошло в чат.
+    if (state.command == 'rn' or state.command == 'fn' or state.command == 'jn'
+        or state.command == 'n' or state.command == 'm')
+        and not fromBuffer and type(sampGetChatString) == 'function' then
+        -- Сверяем отображённую строку: RPC может содержать больше, чем вошло в чат.
         state.eventReceived = accepted
     else
         state.received = accepted
