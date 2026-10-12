@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '12102026_213438'
+LOCAL_VERSION = '12102026_221229'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -2639,6 +2639,15 @@ end
 
 local outgoingSplitGuard = false
 
+function consumeOutgoingSplitGuard(message)
+    local expected = outgoingSplitGuard
+    outgoingSplitGuard = false
+    -- Пропускаем только конкретную строку, отправленную самим хелпером.
+    -- Зависшая защита другой команды не должна отключать тег ручной /r или /f.
+    return type(expected) == 'string' and type(message) == 'string'
+        and expected:gsub('^/', '') == message:gsub('^/', '')
+end
+
 -- Подтверждение хранится только для собственной строки, отправляемой сейчас.
 policeHelperTextAck = nil
 policeHelperTextSendBusy = false
@@ -2805,10 +2814,11 @@ function policeHelperSendConfirmedText(message, token)
         local _, bufferBefore = policeHelperReadTextBuffer()
         state.bufferBefore = bufferBefore
         policeHelperTextAck = state
-        outgoingSplitGuard = true
         local prefix = spec.command ~= '' and '/' .. spec.command .. ' ' or ''
+        local outgoingMessage = prefix .. state.opening .. state.wire .. state.closing
+        outgoingSplitGuard = outgoingMessage
         lastSentAt = policeHelperTextMilliseconds()
-        local sent = pcall(sampSendChat, prefix .. state.opening .. state.wire .. state.closing)
+        local sent = pcall(sampSendChat, outgoingMessage)
         if not sent then
             outgoingSplitGuard = false
             state.failed = true
@@ -2846,14 +2856,14 @@ end
 function policeHelperQueueConfirmedText(message)
     lua_thread.create(function()
         if not policeHelperSendConfirmedText(message) then
-            outgoingSplitGuard = true
+            outgoingSplitGuard = message
             sampSendChat(message)
         end
     end)
 end
 
 function sendRawRpCommand(message)
-    outgoingSplitGuard = true
+    outgoingSplitGuard = message
     sampSendChat(message)
 end
 
@@ -2869,7 +2879,7 @@ end
 local function sendPreparedParts(parts)
     lua_thread.create(function()
         for index, part in ipairs(parts) do
-            outgoingSplitGuard = true
+            outgoingSplitGuard = part
             sampSendChat(part)
             if index < #parts then wait(math.max(0, delayMs[0])) end
         end
@@ -2877,7 +2887,7 @@ local function sendPreparedParts(parts)
 end
 
 function handleSendCommandEvent(message)
-    if outgoingSplitGuard then outgoingSplitGuard = false; return end
+    if consumeOutgoingSplitGuard(message) then return end
     if type(message) ~= 'string' or message == '' then return end
     local original = message
     message = addManualRadioTag(message)
@@ -2901,8 +2911,9 @@ function sampev.onSendCommand(message)
 end
 
 function handleSendChatEvent(message)
-    if outgoingSplitGuard then outgoingSplitGuard = false; return end
+    if consumeOutgoingSplitGuard(message) then return end
     if type(message) ~= 'string' or message == '' then return end
+    message = addManualRadioTag(message)
     if policeHelperTextSpec(message) then
         policeHelperQueueConfirmedText(message)
         return false
@@ -3053,7 +3064,7 @@ function runSequence(name, lines, options)
             else
                 local handled, lastSentAt = policeHelperSendConfirmedText(item, token)
                 if not handled then
-                    outgoingSplitGuard = true
+                    outgoingSplitGuard = item
                     lastSentAt = policeHelperTextMilliseconds()
                     sampSendChat(item)
                 end
