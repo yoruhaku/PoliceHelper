@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '12102026_044227'
+LOCAL_VERSION = '12102026_210807'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -2654,7 +2654,9 @@ function policeHelperTextSpec(message)
     command = command:lower()
     if not splitCommands[command] and command ~= 't' then return nil end
     local limit = 90
-    if command == 'r' or command == 'rn' or command == 'f' or command == 'fn' then limit = 74 end
+    if command == 'r' or command == 'f' then limit = 74 end
+    -- OOC-обрамление и заголовок канала оставляют меньше места для текста.
+    if command == 'rn' or command == 'fn' or command == 'jn' then limit = 60 end
     if command == 'm' then limit = 72 end
     local opening, closing = '', ''
     if body:match('^%(%(%s') and body:match('%s%)%)$') then
@@ -2755,15 +2757,29 @@ function sampev.onChatMessage(playerId, text)
     return safeEventCall('подтверждения обычного чата', policeHelperConfirmText, trim(stripColorCodes(text)), playerId)
 end
 
+function policeHelperTextMilliseconds()
+    if type(localClock) == 'function' then
+        local ok, seconds = pcall(localClock)
+        if ok and type(seconds) == 'number' then return seconds * 1000 end
+    end
+    -- Резервный таймер нужен только если штатный таймер MoonLoader недоступен.
+    return os.time() * 1000
+end
+
+function policeHelperTextElapsed(started)
+    return math.max(0, policeHelperTextMilliseconds() - started)
+end
+
 function policeHelperSendConfirmedText(message, token)
     local spec = policeHelperTextSpec(message)
     if not spec then return false end
+    -- Обычная короткая строка не должна ждать ответа сервера перед следующей.
+    if #spec.body + #(spec.opening or '') + #(spec.closing or '') <= spec.limit then return false end
     -- Одна очередь: подтверждения параллельных сообщений не смешиваются.
-    local waited = 0
-    while policeHelperTextSendBusy and waited < 15000 do
+    local queuedAt = policeHelperTextMilliseconds()
+    while policeHelperTextSendBusy and policeHelperTextElapsed(queuedAt) < 15000 do
         if token and token ~= sequenceToken then return true end
         wait(25)
-        waited = waited + 25
     end
     if policeHelperTextSendBusy then
         notify('Продолжение текста отменено: очередь сообщений занята.')
@@ -2775,6 +2791,7 @@ function policeHelperSendConfirmedText(message, token)
     if not nameOk or type(nickname) ~= 'string' or nickname == '' then return false end
     policeHelperTextSendBusy = true
     local remaining, index = spec.body, 1
+    local lastSentAt
     while remaining ~= '' and index <= 128 do
         if token and token ~= sequenceToken then break end
         local lead = index > 1 and '...' or ''
@@ -2791,17 +2808,21 @@ function policeHelperSendConfirmedText(message, token)
         policeHelperTextAck = state
         outgoingSplitGuard = true
         local prefix = spec.command ~= '' and '/' .. spec.command .. ' ' or ''
+        lastSentAt = policeHelperTextMilliseconds()
         local sent = pcall(sampSendChat, prefix .. state.opening .. state.wire .. state.closing)
         if not sent then
             outgoingSplitGuard = false
             state.failed = true
         end
-        local elapsed = 0
-        while not state.received and not state.failed and elapsed < 5000 do
+        local nextBufferPoll = 100
+        while not state.received and not state.failed and policeHelperTextElapsed(lastSentAt) < 5000 do
             if token and token ~= sequenceToken then break end
             wait(25)
-            elapsed = elapsed + 25
-            if elapsed % 100 == 0 then policeHelperConfirmTextBuffer(state) end
+            local elapsed = policeHelperTextElapsed(lastSentAt)
+            if elapsed >= nextBufferPoll then
+                policeHelperConfirmTextBuffer(state)
+                nextBufferPoll = elapsed + 100
+            end
         end
         policeHelperTextAck = nil
         if not state.received then
@@ -2812,11 +2833,15 @@ function policeHelperSendConfirmedText(message, token)
         end
         remaining = trim(remaining:sub(state.received + 1))
         index = index + 1
-        if remaining ~= '' then wait(math.max(500, tonumber(delayMs[0]) or 1000)) end
+        if remaining ~= '' then
+            local interval = math.max(500, tonumber(delayMs[0]) or 1000)
+            local pause = math.max(0, interval - policeHelperTextElapsed(lastSentAt))
+            if pause > 0 then wait(pause) end
+        end
     end
     policeHelperTextAck = nil
     policeHelperTextSendBusy = false
-    return true
+    return true, lastSentAt
 end
 
 function policeHelperQueueConfirmedText(message)
@@ -3027,12 +3052,16 @@ function runSequence(name, lines, options)
                     setVirtualKeyDown(vkeys.VK_F8, false)
                 end
             else
-                if not policeHelperSendConfirmedText(item, token) then
+                local handled, lastSentAt = policeHelperSendConfirmedText(item, token)
+                if not handled then
                     outgoingSplitGuard = true
+                    lastSentAt = policeHelperTextMilliseconds()
                     sampSendChat(item)
                 end
                 if index < #prepared and type(prepared[index + 1]) ~= 'table' then
-                    wait(math.max(0, delayMs[0]))
+                    local interval = math.max(0, tonumber(delayMs[0]) or 1000)
+                    local pause = math.max(0, interval - (lastSentAt and policeHelperTextElapsed(lastSentAt) or 0))
+                    if pause > 0 then wait(pause) end
                 end
             end
         end
@@ -6922,8 +6951,8 @@ function interviewDocuments()
     local ok, resolvedId = sampGetPlayerIdByCharHandle(PLAYER_PED)
     if ok then ownId = resolvedId end
     local hint = ownId >= 0
-        and ('/n Для передачи документов: /pass ' .. ownId .. ', /lic ' .. ownId .. ', /wbook ' .. ownId .. '.')
-        or '/n Покажите паспорт, лицензии и выписку из тира доступными серверными командами.'
+        and ('/n Документы: /pass ' .. ownId .. ', /lic ' .. ownId .. ', /skill ' .. ownId .. '.')
+        or '/n Документы: /pass, /lic, /skill – укажите ID проводящего собеседование.'
     runInterviewStep(3, 'Запрос документов', {
         'Предъявите, пожалуйста, паспорт, лицензии и выписку из тира.',
         hint
@@ -9217,7 +9246,7 @@ function drawInterviewWindow(context)
         if imgui.Button(u8'3. Запросить документы', imgui.ImVec2(340, 34)) then interviewDocuments() end
         if imgui.Button(u8'4. Изучить документы', imgui.ImVec2(340, 34)) then interviewInspectDocuments() end
         imgui.Spacing()
-        imgui.TextDisabled(u8'Подсказка кандидату: /pass, /lic и /wbook с вашим ID.')
+        imgui.TextDisabled(u8'Подсказка кандидату: /pass, /lic и /skill с вашим ID.')
         imgui.Spacing()
         if interviewState.lastStep > 0 then
             imgui.TextColored(imgui.ImVec4(0.35, 0.70, 1.0, 1.0),
