@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '11102026_211512'
+LOCAL_VERSION = '12102026_044227'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -1604,6 +1604,7 @@ end
 
 function handleServerMessageEvent(color, text)
     local clean = trim(stripColorCodes(text))
+    if type(policeHelperConfirmText) == 'function' then policeHelperConfirmText(clean) end
 
     local callerPhone = clean:match('^Входящий звонок%s*|%s*Номер:%s*(%d+)')
     if callerPhone then
@@ -2584,10 +2585,12 @@ local function splitLongText(text, limit)
     local chunks = {}
     local remaining = trim(text)
     while #remaining > limit do
-        local head = remaining:sub(1, limit + 1)
-        local splitAt = head:match('^.*()%s+') or limit
-        local chunk = trim(remaining:sub(1, splitAt))
-        if chunk == '' then chunk, splitAt = remaining:sub(1, limit), limit end
+        local head = remaining:sub(1, limit)
+        local spaceAt = head:match('^.*()%s+')
+        -- Не оставляем короткий тег отдельной строкой перед длинным словом.
+        local splitAt = spaceAt and spaceAt > limit / 2 and spaceAt - 1 or limit
+        if splitAt < 1 then splitAt = limit end
+        local chunk = remaining:sub(1, splitAt)
         table.insert(chunks, chunk)
         remaining = trim(remaining:sub(splitAt + 1))
     end
@@ -2619,7 +2622,8 @@ local function prepareMessageParts(message)
     end
     if #body <= limit then return { message } end
 
-    local chunks = splitLongText(body, limit)
+    -- Многоточия тоже занимают место в серверной строке.
+    local chunks = splitLongText(body, limit - 6)
     local result = {}
     for index, chunk in ipairs(chunks) do
         local prefix = command and ('/' .. command .. ' ') or ''
@@ -2636,6 +2640,193 @@ local function prepareMessageParts(message)
 end
 
 local outgoingSplitGuard = false
+
+-- Подтверждение хранится только для собственной строки, отправляемой сейчас.
+policeHelperTextAck = nil
+policeHelperTextSendBusy = false
+
+function policeHelperTextSpec(message)
+    local command, body = tostring(message or ''):match('^/(%a+)%s+(.+)$')
+    if not command then
+        if tostring(message):sub(1, 1) == '/' then return nil end
+        return { command = '', body = tostring(message), limit = 90 }
+    end
+    command = command:lower()
+    if not splitCommands[command] and command ~= 't' then return nil end
+    local limit = 90
+    if command == 'r' or command == 'rn' or command == 'f' or command == 'fn' then limit = 74 end
+    if command == 'm' then limit = 72 end
+    local opening, closing = '', ''
+    if body:match('^%(%(%s') and body:match('%s%)%)$') then
+        opening, closing = '(( ', ' ))'
+        body = body:sub(4, -4)
+    end
+    -- Цветовые вставки нельзя считать по очищенному серверному тексту.
+    if body:find('{%x%x%x%x%x%x}') then return nil end
+    return { command = command, body = trim(body), limit = limit, opening = opening, closing = closing }
+end
+
+function policeHelperReadTextBuffer()
+    local rows, counts = {}, {}
+    if type(sampGetChatString) ~= 'function' then return rows, counts end
+    -- Читаем только последние строки через штатную функцию, без доступа к памяти.
+    for index = 75, 99 do
+        local ok, text, prefix = pcall(sampGetChatString, index)
+        if ok and type(text) == 'string' and text ~= '' then
+            prefix = type(prefix) == 'string' and prefix or ''
+            local key = prefix .. '\n' .. text
+            counts[key] = (counts[key] or 0) + 1
+            rows[#rows + 1] = { text = text, prefix = prefix, key = key }
+        end
+    end
+    return rows, counts
+end
+
+function policeHelperConfirmTextBuffer(state)
+    local rows, counts = policeHelperReadTextBuffer()
+    for _, row in ipairs(rows) do
+        -- Старые сообщения с таким же текстом не подтверждают новую отправку.
+        if (counts[row.key] or 0) > ((state.bufferBefore or {})[row.key] or 0) then
+            local clean = trim(stripColorCodes(row.text))
+            policeHelperConfirmText(clean, nil, true)
+            if not state.received and row.prefix ~= '' then
+                local prefix = trim(stripColorCodes(row.prefix))
+                policeHelperConfirmText(prefix .. ' ' .. clean, nil, true)
+                if not state.received then policeHelperConfirmText(prefix .. ': ' .. clean, nil, true) end
+            end
+            if state.received or state.failed then return end
+        end
+    end
+end
+
+function policeHelperConfirmText(clean, playerId, fromBuffer)
+    local state = policeHelperTextAck
+    if not state or state.received or state.failed then return end
+    if clean == 'Не флудите' or clean == 'Слишком длинное сообщение' then
+        state.failed = true
+        return
+    end
+    local posted
+    if playerId ~= nil and playerId == state.id
+        and (state.command == '' or state.wire:sub(1, #clean) == clean) then
+        posted = clean
+    else
+        -- Форматированная строка может прийти как через CLIENTMESSAGE, так и через CHAT.
+        -- Для неё определяем автора по серверному заголовку, а не по типу RPC.
+        local escaped = state.nickname:gsub('([^%w])', '%%%1')
+        local start, finish = clean:find(escaped .. '%[' .. state.id .. '%]:%s*')
+        if not start then start, finish = clean:find(escaped .. ':%s*') end
+        if start then
+            local header = clean:sub(1, start - 1)
+            if header:find(':', 1, true) then return end
+            local channels = { r = 'R', rn = 'RN', f = 'F', fn = 'FN', j = 'J', jn = 'JN', a = 'A' }
+            local channel = channels[state.command]
+            if channel and not header:find('[' .. channel .. ']', 1, true) then return end
+            if state.command == 'm' and not header:find('<<', 1, true) then return end
+            if state.command == '' and header:find('[', 1, true) then return end
+            if state.command == 'n' and not header:find('((', 1, true) then return end
+            posted = clean:sub(finish + 1)
+            if state.command == 'm' then posted = posted:gsub('%s*>>$', '') end
+            if state.command == 'n' or state.command == 'rn' or state.command == 'fn' or state.command == 'jn' then
+                posted = posted:gsub('%s*%)%)$', '')
+            end
+        elseif state.command == '' then
+            local markerStart = clean:find('%(' .. escaped .. '%)%[' .. state.id .. '%]')
+            if markerStart then posted = trim(clean:sub(1, markerStart - 1)):gsub('^%-%s*', '') end
+        end
+    end
+    if not posted then return end
+    posted = trim(posted)
+    if state.closing ~= '' then posted = posted:gsub('%s*%)%)$', '') end
+    if state.opening ~= '' then posted = posted:gsub('^%(%(%s*', '') end
+    -- Сверяем именно начало отправленного фрагмента, а не похожую чужую строку.
+    if #posted < math.min(12, #state.wire) or state.wire:sub(1, #posted) ~= posted then return end
+    local accepted = #posted - #state.lead
+    if accepted < 1 or accepted > #state.piece then return end
+    if state.command == 'rn' and not fromBuffer and type(sampGetChatString) == 'function' then
+        -- Для RN сверяем отображённую строку: RPC может содержать больше, чем вошло в чат.
+        state.eventReceived = accepted
+    else
+        state.received = accepted
+    end
+end
+
+function sampev.onChatMessage(playerId, text)
+    return safeEventCall('подтверждения обычного чата', policeHelperConfirmText, trim(stripColorCodes(text)), playerId)
+end
+
+function policeHelperSendConfirmedText(message, token)
+    local spec = policeHelperTextSpec(message)
+    if not spec then return false end
+    -- Одна очередь: подтверждения параллельных сообщений не смешиваются.
+    local waited = 0
+    while policeHelperTextSendBusy and waited < 15000 do
+        if token and token ~= sequenceToken then return true end
+        wait(25)
+        waited = waited + 25
+    end
+    if policeHelperTextSendBusy then
+        notify('Продолжение текста отменено: очередь сообщений занята.')
+        return true
+    end
+    local ok, id = sampGetPlayerIdByCharHandle(PLAYER_PED)
+    if not ok then return false end
+    local nameOk, nickname = pcall(sampGetPlayerNickname, id)
+    if not nameOk or type(nickname) ~= 'string' or nickname == '' then return false end
+    policeHelperTextSendBusy = true
+    local remaining, index = spec.body, 1
+    while remaining ~= '' and index <= 128 do
+        if token and token ~= sequenceToken then break end
+        local lead = index > 1 and '...' or ''
+        local budget = spec.limit - #lead - #(spec.opening or '') - #(spec.closing or '')
+        local piece = splitLongText(remaining, budget)[1]
+        if piece and piece:match('^%b[]:?$') and #remaining > #piece then
+            piece = remaining:sub(1, budget)
+        end
+        if not piece or piece == '' then break end
+        local state = { command = spec.command, id = id, nickname = nickname, piece = piece,
+            lead = lead, wire = lead .. piece, opening = spec.opening or '', closing = spec.closing or '' }
+        local _, bufferBefore = policeHelperReadTextBuffer()
+        state.bufferBefore = bufferBefore
+        policeHelperTextAck = state
+        outgoingSplitGuard = true
+        local prefix = spec.command ~= '' and '/' .. spec.command .. ' ' or ''
+        local sent = pcall(sampSendChat, prefix .. state.opening .. state.wire .. state.closing)
+        if not sent then
+            outgoingSplitGuard = false
+            state.failed = true
+        end
+        local elapsed = 0
+        while not state.received and not state.failed and elapsed < 5000 do
+            if token and token ~= sequenceToken then break end
+            wait(25)
+            elapsed = elapsed + 25
+            if elapsed % 100 == 0 then policeHelperConfirmTextBuffer(state) end
+        end
+        policeHelperTextAck = nil
+        if not state.received then
+            if #remaining > #piece and not state.failed and (not token or token == sequenceToken) then
+                notify('Сервер не подтвердил текст. Продолжение остановлено, чтобы избежать повторов.')
+            end
+            break
+        end
+        remaining = trim(remaining:sub(state.received + 1))
+        index = index + 1
+        if remaining ~= '' then wait(math.max(500, tonumber(delayMs[0]) or 1000)) end
+    end
+    policeHelperTextAck = nil
+    policeHelperTextSendBusy = false
+    return true
+end
+
+function policeHelperQueueConfirmedText(message)
+    lua_thread.create(function()
+        if not policeHelperSendConfirmedText(message) then
+            outgoingSplitGuard = true
+            sampSendChat(message)
+        end
+    end)
+end
 
 function sendRawRpCommand(message)
     outgoingSplitGuard = true
@@ -2667,6 +2858,10 @@ function handleSendCommandEvent(message)
     local original = message
     message = addManualRadioTag(message)
     local normalized = normalizeRpMessage(message)
+    if policeHelperTextSpec(normalized) then
+        policeHelperQueueConfirmedText(normalized)
+        return false
+    end
     local parts = prepareMessageParts(normalized)
     if #parts > 1 then
         sendPreparedParts(parts)
@@ -2684,6 +2879,10 @@ end
 function handleSendChatEvent(message)
     if outgoingSplitGuard then outgoingSplitGuard = false; return end
     if type(message) ~= 'string' or message == '' then return end
+    if policeHelperTextSpec(message) then
+        policeHelperQueueConfirmedText(message)
+        return false
+    end
     local parts = prepareMessageParts(message)
     if #parts > 1 then
         sendPreparedParts(parts)
@@ -2796,7 +2995,11 @@ function runSequence(name, lines, options)
         else
             local message = replaceTokens(raw, target, options.tokens)
             if trim(message) ~= '' then
-                for _, part in ipairs(prepareMessageParts(message)) do table.insert(prepared, part) end
+                if policeHelperTextSpec(message) then
+                    table.insert(prepared, message)
+                else
+                    for _, part in ipairs(prepareMessageParts(message)) do table.insert(prepared, part) end
+                end
             end
         end
     end
@@ -2824,8 +3027,10 @@ function runSequence(name, lines, options)
                     setVirtualKeyDown(vkeys.VK_F8, false)
                 end
             else
-                outgoingSplitGuard = true
-                sampSendChat(item)
+                if not policeHelperSendConfirmedText(item, token) then
+                    outgoingSplitGuard = true
+                    sampSendChat(item)
+                end
                 if index < #prepared and type(prepared[index + 1]) ~= 'table' then
                     wait(math.max(0, delayMs[0]))
                 end
@@ -8799,7 +9004,7 @@ imgui.OnFrame(
         -- Видимый курсор mimgui продолжает обрабатывать элементы интерфейса сам.
         context.LockPlayer = false
         safeInterfaceFrame('главного окна', function()
-        imgui.SetNextWindowSize(imgui.ImVec2(1080, 680), imgui.Cond.FirstUseEver)
+        imgui.SetNextWindowSize(imgui.ImVec2(1200, 680), imgui.Cond.FirstUseEver)
         local display = imgui.GetIO().DisplaySize
         imgui.SetNextWindowPos(imgui.ImVec2(display.x * 0.5, display.y * 0.5),
             imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
