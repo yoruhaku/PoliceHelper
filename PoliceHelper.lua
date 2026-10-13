@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '12102026_221229'
+LOCAL_VERSION = '13102026_074020'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -2637,6 +2637,22 @@ local function prepareMessageParts(message)
     return result
 end
 
+function prepareSequenceMessageParts(message)
+    if tostring(message):sub(1, 1) == '/' then return prepareMessageParts(message) end
+    -- Ограничиваем только речь из биндов. Ручной обычный чат не перехватываем.
+    -- Не ждём серверного подтверждения, поэтому задержка остаётся заданной в настройках.
+    local body = trim(tostring(message))
+    if #body <= 90 then return { body } end
+    local chunks = splitLongText(body, 84)
+    local result = {}
+    for index, chunk in ipairs(chunks) do
+        local lead = index > 1 and '...' or ''
+        local ending = index < #chunks and '...' or ''
+        result[#result + 1] = lead .. chunk .. ending
+    end
+    return result
+end
+
 local outgoingSplitGuard = false
 
 function consumeOutgoingSplitGuard(message)
@@ -3033,7 +3049,7 @@ function runSequence(name, lines, options)
                 if policeHelperTextSpec(message) then
                     table.insert(prepared, message)
                 else
-                    for _, part in ipairs(prepareMessageParts(message)) do table.insert(prepared, part) end
+                    for _, part in ipairs(prepareSequenceMessageParts(message)) do table.insert(prepared, part) end
                 end
             end
         end
@@ -6802,7 +6818,7 @@ end
 function commandFederalSurrender()
     runSequence('Требование сдаться', {
         'Гражданин, оставайтесь на месте! Вы находитесь в федеральном розыске!',
-        'Не пытайтесь скрыться. Поднимите руки и добровольно сдавайтесь сотрудникам правоохранительных органов!'
+        'Не пытайтесь скрыться. Поднимите руки и добровольно сдавайтесь сотрудникам МВД!'
     })
 end
 
