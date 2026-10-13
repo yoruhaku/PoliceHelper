@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '13102026_074020'
+LOCAL_VERSION = '13102026_074606'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -775,13 +775,11 @@ trackedMapSearchUntil = 0
 trackedWaypointX = nil
 trackedWaypointY = nil
 trackedWaypointAnnounced = false
-maskRpPending = false
-maskRequestToken = 0
+maskRpUntil = 0.0
 lastAutoMaskRenewAt = 0
 unmaskRpPending = false
 unmaskRequestToken = 0
-healmeRpPending = false
-healmeRequestToken = 0
+healmeRpUntil = 0.0
 departmentDoorPending = false
 departmentDoorPendingUntil = 0.0
 lastAutoEatAt = -100.0
@@ -1962,15 +1960,16 @@ function handleServerMessageEvent(color, text)
         end)
     end
 
-    if maskRpPending then
-        if clean:find('Вы надели маску. Чтобы её снять, введите /end', 1, true) then
-            maskRpPending = false
+    -- Успех отслеживается пассивно: запрос не блокирует команды и не занимает очередь.
+    if maskRpUntil > 0 and policeHelperTextMilliseconds() <= maskRpUntil then
+        if clean == 'Вы надели маску' or clean:match('^Вы надели маску[%.!]') then
+            maskRpUntil = 0.0
             lua_thread.create(function()
-                wait(100)
+                wait(0)
                 sampSendChat(configuredRoleplayLine('mask', 1, '/me достал маску из кармана и надел её на лицо'))
             end)
         elseif clean == 'У Вас нет с собой маски' then
-            maskRpPending = false
+            maskRpUntil = 0.0
         end
     end
 
@@ -1993,11 +1992,10 @@ function handleServerMessageEvent(color, text)
         end
     end
 
-    if healmeRpPending
-        and clean:match('^Вы использовали аптечку%. Здоровье пополнено на %d+ единиц$')
+    if healmeRpUntil > 0 and policeHelperTextMilliseconds() <= healmeRpUntil
+        and (clean == 'Вы использовали аптечку' or clean:match('^Вы использовали аптечку[%.!]'))
     then
-        healmeRpPending = false
-        healmeRequestToken = healmeRequestToken + 1
+        healmeRpUntil = 0.0
         lua_thread.create(function()
             wait(0)
             sampSendChat(configuredRoleplayLine('healme', 1, '/me достал аптечку и оказал себе первую помощь'))
@@ -2072,7 +2070,7 @@ function sampev.onServerMessage(color, text)
 end
 
 function handleAutoMaskTimer(x, y, text)
-    if not autoMaskRenew[0] or maskRpPending then return end
+    if not autoMaskRenew[0] then return end
     if trim(stripColorCodes(text)) ~= '00:03' then return end
     x, y = tonumber(x), tonumber(y)
     if not x or not y or math.abs(x - 37.0) > 2.0 or math.abs(y - 306.0) > 2.0 then return end
@@ -6008,18 +6006,9 @@ function commandGpsTrackerClear()
 end
 
 function commandMask()
-    if maskRpPending then
-        notify('Ожидается ответ сервера на предыдущую команду /mask.')
-        return
-    end
-    maskRpPending = true
-    maskRequestToken = maskRequestToken + 1
-    local token = maskRequestToken
+    -- Срок нужен только для сопоставления RP; повторная команда разрешена сразу.
+    maskRpUntil = policeHelperTextMilliseconds() + 5000
     sampSendChat('/mask')
-    lua_thread.create(function()
-        wait(5000)
-        if token == maskRequestToken then maskRpPending = false end
-    end)
 end
 
 function commandUnmask(args)
@@ -6040,18 +6029,8 @@ function commandUnmask(args)
 end
 
 function commandHealme()
-    if healmeRpPending then
-        notify('Ожидается ответ сервера на предыдущую команду /healme.')
-        return
-    end
-    healmeRpPending = true
-    healmeRequestToken = healmeRequestToken + 1
-    local token = healmeRequestToken
+    healmeRpUntil = policeHelperTextMilliseconds() + 5000
     sampSendChat('/healme')
-    lua_thread.create(function()
-        wait(5000)
-        if token == healmeRequestToken then healmeRpPending = false end
-    end)
 end
 
 function sendSosEscalationStep(includeRoleplay)
