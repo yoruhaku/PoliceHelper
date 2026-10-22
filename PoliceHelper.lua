@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '22102026_015556'
+LOCAL_VERSION = '23102026_013704'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -2742,7 +2742,10 @@ function policeHelperTextSpec(message)
     end
     -- Цветовые вставки нельзя считать по очищенному серверному тексту.
     if body:find('{%x%x%x%x%x%x}') then return nil end
-    return { command = command, body = trim(body), limit = limit, opening = opening, closing = closing }
+    -- Проверяем пограничные строки, но не дробим их заранее, если они помещаются целиком.
+    local confirmationLimit = (command == 'r' or command == 'f') and 60 or limit
+    return { command = command, body = trim(body), limit = limit, confirmationLimit = confirmationLimit,
+        opening = opening, closing = closing }
 end
 
 function policeHelperReadTextBuffer()
@@ -2824,7 +2827,8 @@ function policeHelperConfirmText(clean, playerId, fromBuffer)
     if #posted < math.min(12, #state.wire) or state.wire:sub(1, #posted) ~= posted then return end
     local accepted = #posted - #state.lead
     if accepted < 1 or accepted > #state.piece then return end
-    if (state.command == 'rn' or state.command == 'fn' or state.command == 'jn'
+    if (state.command == 'r' or state.command == 'f'
+        or state.command == 'rn' or state.command == 'fn' or state.command == 'jn'
         or state.command == 'n' or state.command == 'm')
         and not fromBuffer and type(sampGetChatString) == 'function' then
         -- Сверяем отображённую строку: RPC может содержать больше, чем вошло в чат.
@@ -2855,7 +2859,7 @@ function policeHelperSendConfirmedText(message, token)
     local spec = policeHelperTextSpec(message)
     if not spec then return false end
     -- Обычная короткая строка не должна ждать ответа сервера перед следующей.
-    if #spec.body + #(spec.opening or '') + #(spec.closing or '') <= spec.limit then return false end
+    if #spec.body + #(spec.opening or '') + #(spec.closing or '') <= (spec.confirmationLimit or spec.limit) then return false end
     -- Одна очередь: подтверждения параллельных сообщений не смешиваются.
     local queuedAt = policeHelperTextMilliseconds()
     while policeHelperTextSendBusy and policeHelperTextElapsed(queuedAt) < 15000 do
@@ -3279,20 +3283,20 @@ local tenCodes = {
 }
 
 local situationCodes = {
-    {'CODE 0', 'Офицер ранен или убит; высший приоритет'},
-    {'CODE 1', 'Офицер в бедственном положении'},
-    {'CODE 1-1', 'Выезд из гаража'},
-    {'CODE 1-3', 'Уход с патруля с указанием причины'},
-    {'CODE 1-4', 'Транспортировка задержанного в департамент'},
-    {'CODE 2', 'Нужна помощь без сирен и стробоскопов'},
-    {'CODE 3', 'Экстренный вызов, требуется срочная помощь'},
-    {'CODE 4', 'Ситуация под контролем'},
-    {'CODE 5', 'Поддержка ближайших патрулей'},
-    {'CODE 6', 'Держаться подальше от опасного места'},
-    {'CODE 7', 'Обеденный перерыв'},
-    {'CODE 8', 'Требуется скорая помощь'},
-    {'CODE 9', 'Выставить оцепление'},
-    {'CODE 21', 'Преступник нейтрализован'}
+    {'C\'0', 'Офицер ранен или убит; высший приоритет'},
+    {'C\'1', 'Офицер в бедственном положении'},
+    {'C\'1-1', 'Выезд из гаража'},
+    {'C\'1-3', 'Уход с патруля с указанием причины'},
+    {'C\'1-4', 'Транспортировка задержанного в департамент'},
+    {'C\'2', 'Нужна помощь без сирен и стробоскопов'},
+    {'C\'3', 'Экстренный вызов, требуется срочная помощь'},
+    {'C\'4', 'Ситуация под контролем'},
+    {'C\'5', 'Поддержка ближайших патрулей'},
+    {'C\'6', 'Держаться подальше от опасного места'},
+    {'C\'7', 'Обеденный перерыв'},
+    {'C\'8', 'Требуется скорая помощь'},
+    {'C\'9', 'Выставить оцепление'},
+    {'C\'21', 'Преступник нейтрализован'}
 }
 
 local markings = {
@@ -3313,7 +3317,7 @@ local procedures = {
         '5. Запросить паспорт, водительское удостоверение и документы на автомобиль.',
         '6. Проверить документы и объяснить нарушение.',
         '7. Вынести предупреждение либо оформить штраф с видеофиксацией.',
-        '8. Вернуть документы, разрешить продолжить движение и доложить CODE-4.'
+        '8. Вернуть документы, разрешить продолжить движение и доложить C\'4.'
     },
     ['10-66'] = {
         '1. Запросить подкрепление и сообщить данные автомобиля, место и уровень риска.',
@@ -10391,7 +10395,7 @@ local function commandArrest(args)
         '/me заполнил данные задержанного и передал материалы дежурному сотруднику.',
         '/arrest {id} {cmd_reason}'
     }
-    appendAutomaticRadioReport(lines, '10-15, задержанный арестован. CODE-4.')
+    appendAutomaticRadioReport(lines, '10-15, задержанный арестован. C\'4.')
     runSequence('Арест', lines, { targetId = tonumber(id), tokens = { ['{cmd_reason}'] = trim(reason) } })
 end
 
@@ -10466,7 +10470,7 @@ function sendSosEscalationStep(includeRoleplay)
         .. 'SOS! Помощь на GPS ' .. sosEscalationId .. '. {place_short}.'
     lines[#lines + 1] = '/su ' .. sosEscalationId .. ' 1 SOS! GPS: ' .. sosEscalationId
     if includeRoleplay then
-        appendAutomaticRadioReport(lines, 'CODE-0! SOS, нужна поддержка. 10-20: {place}.')
+        appendAutomaticRadioReport(lines, 'C\'0! SOS, нужна поддержка. 10-20: {place}.')
     end
     sosEscalationAwaiting = true
     sosEscalationNextAt = 0.0
@@ -10939,7 +10943,7 @@ local helperCommandSections = {
             {'/rstart', 'Передать доклад о начале патруля', '/rstart'},
             {'/rpat', 'Передать текущий статус патруля', '/rpat'},
             {'/rend', 'Передать доклад о завершении патруля', '/rend'},
-            {'/r4', 'Передать состав патруля и состояние 10-4', '/r4'},
+            {'/r4', 'Передать состав патруля и состояние C\'4, доступен', '/r4'},
             {'/r20', 'Передать текущее местоположение', '/r20'},
             {'/r3', 'Запросить срочную поддержку по местоположению', '/r3'}
         }
@@ -11729,15 +11733,15 @@ local function commandBodycam()
 end
 
 local function commandPatrolStart()
-    radio('Начинаю патруль. Состав: {crew}. 10-20: {place}. 10-4, доступен.')
+    radio('Начинаю патруль. Состав: {crew}. 10-20: {place}. C\'4, доступен.')
 end
 
 local function commandPatrolStatus()
-    radio('Патрулирую {place}. Состав: {crew}. 10-4, доступен.')
+    radio('Патрулирую {place}. Состав: {crew}. C\'4, доступен.')
 end
 
 local function commandPatrolEnd()
-    radio('Завершаю патруль. Состав: {crew}. 10-7, недоступен.')
+    radio('Завершаю патруль. Состав: {crew}. C\'1-3, недоступен.')
 end
 
 policeAnimations = {
@@ -12126,7 +12130,7 @@ local function drawRadioGuide()
     imgui.Columns(2, 'radioGuideColumns', false)
     section('Патруль и статусы')
     drawCommandRows({
-        {'/r4', 'Передать состав патруля и состояние 10-4'},
+        {'/r4', 'Передать состав патруля и состояние C\'4, доступен'},
         {'/r20', 'Передать текущий район и состояние'},
         {'/rstart', 'Начать патруль с автоматическими данными'},
         {'/rpat', 'Текущий статус патруля'},
@@ -12136,7 +12140,7 @@ local function drawRadioGuide()
     imgui.NextColumn()
     section('Поддержка и остановки')
     drawCommandRows({
-        {'/r3', 'CODE-3, запросить срочную поддержку'},
+        {'/r3', 'C\'3, запросить срочную поддержку'},
         {'/m55', 'Обычный трафик-стоп 10-55'},
         {'/m66', 'Трафик-стоп повышенного риска 10-66'},
         {'/dor', 'Потребовать уступить дорогу служебному автомобилю'},
@@ -12200,16 +12204,16 @@ function drawPatrol()
     imgui.TextWrapped(u8'Теги и профиль настраиваются во вкладке «Настройки». Данные патруля определяются автоматически.')
 
     if wideButton('Начать патруль', 175) then
-        radio('CODE 1-1, выехал в патруль. Состав: {crew}. Район: {location}. Доступен.')
+        radio('C\'1-1, выехал в патруль. Состав: {crew}. Район: {location}. Доступен.')
     end
     if sameButton('Состав / статус', 175) then
-        radio('Состав: {crew}. 10-20: {location}. Состояние: 10-4, доступен.')
+        radio('Состав: {crew}. 10-20: {location}. C\'4, доступен.')
     end
     if wideButton('Сменить маркировку', 175) then
         radio('10-27, текущая маркировка: {unit}. Новая маркировка указана диспетчеру.')
     end
     if sameButton('Закончить патруль', 175) then
-        radio('CODE 1-3, покидаю патруль. Причина: {note}.')
+        radio('C\'1-3, покидаю патруль. Причина: {note}.')
     end
 
     imgui.NextColumn()
@@ -12226,11 +12230,11 @@ function drawPatrol()
     if sameButton('Прекратить преследование', 175) then
         commandStopChase()
     end
-    if wideButton('CODE-4 – завершить', 175) then
-        radio('CODE-4, ситуация урегулирована. 10-20: {location}. Доступен.')
+    if wideButton('C\'4 – завершить', 175) then
+        radio('C\'4, ситуация урегулирована. 10-20: {location}. Доступен.')
     end
     if sameButton('Запросить подмогу', 175) then
-        radio('10-70, требуется поддержка. CODE-3. 10-20: {location}. {note}')
+        radio('10-70, требуется поддержка. C\'3. 10-20: {location}. {note}')
     end
     imgui.Columns(1)
 end
@@ -12319,13 +12323,13 @@ function drawRadio()
 
     imgui.NextColumn()
     section('Ситуационные доклады')
-    if wideButton('CODE 0 – офицер ранен', 250) then radio('CODE 0! Офицер ранен. 10-20: {location}. Требуется немедленная поддержка!') end
-    if wideButton('CODE 1 – офицер в беде', 250) then radio('CODE 1! Офицер в бедственном положении. 10-20: {location}.') end
-    if wideButton('CODE 2 – тихая поддержка', 250) then radio('CODE 2, требуется поддержка без спецсигналов. 10-20: {location}.') end
-    if wideButton('CODE 3 – экстренная помощь', 250) then radio('CODE 3, требуется срочная поддержка. 10-20: {location}. {note}') end
-    if wideButton('CODE 4 – под контролем', 250) then radio('CODE-4, ситуация под контролем. 10-20: {location}.') end
-    if wideButton('CODE 5 – ближайшие юниты', 250) then radio('CODE 5, требуется поддержка ближайших патрулей. 10-20: {location}.') end
-    if wideButton('CODE 8 – медики', 250) then radio('CODE 8, требуется медицинская помощь. 10-20: {location}. {note}') end
+    if wideButton('C\'0 – офицер ранен', 250) then radio('C\'0! Офицер ранен. 10-20: {location}. Требуется немедленная поддержка!') end
+    if wideButton('C\'1 – офицер в беде', 250) then radio('C\'1! Офицер в бедственном положении. 10-20: {location}.') end
+    if wideButton('C\'2 – тихая поддержка', 250) then radio('C\'2, требуется поддержка без спецсигналов. 10-20: {location}.') end
+    if wideButton('C\'3 – экстренная помощь', 250) then radio('C\'3, требуется срочная поддержка. 10-20: {location}. {note}') end
+    if wideButton('C\'4 – под контролем', 250) then radio('C\'4, ситуация под контролем. 10-20: {location}.') end
+    if wideButton('C\'5 – ближайшие юниты', 250) then radio('C\'5, требуется поддержка ближайших патрулей. 10-20: {location}.') end
+    if wideButton('C\'8 – медики', 250) then radio('C\'8, требуется медицинская помощь. 10-20: {location}. {note}') end
     if wideButton('Потерян из виду', 250) then radio('Подозреваемый потерян из виду. Последнее 10-20: {location}. Автомобиль: {vehicle}. {note}') end
     imgui.Columns(1)
 end
@@ -13039,7 +13043,7 @@ editorCommandGroups = {
         {'proc', '', 'Потребовать не мешать сотрудникам'}, {'pr', '', 'Потребовать прекратить преследование'}
     }},
     { title = 'Рация и патруль', items = {
-        {'r4', '', 'Передать состав и состояние 10-4'}, {'r20', '', 'Передать текущее местоположение'},
+        {'r4', '', 'Передать состав и состояние C\'4, доступен'}, {'r20', '', 'Передать текущее местоположение'},
         {'r3', '', 'Запросить срочную поддержку'}, {'rstart', '', 'Начать патруль'},
         {'rpat', '', 'Передать статус патруля'}, {'rend', '', 'Закончить патруль'}
     }},
@@ -13629,8 +13633,8 @@ quickActionPages = {
         { id = 'verbal_warning', label = 'Устное предупреждение', action = commandVerbalTrafficWarning }
     },
     radio = {
-        { id = 'radio_status', label = 'Состояние 10-4', action = function() radio('Состав: {crew} | Состояние: 10-4') end },
-        { id = 'backup', label = 'Поддержка', action = function() radio('CODE-3, требуется срочная поддержка. 10-20: {place}.') end },
+        { id = 'radio_status', label = 'C\'4, доступен', action = function() radio('Состав: {crew}. C\'4, доступен.') end },
+        { id = 'backup', label = 'Поддержка', action = function() radio('C\'3, требуется срочная поддержка. 10-20: {place}.') end },
         { id = 'sos', label = 'Тревожная кнопка', action = commandSos }
     },
     equipment = {
@@ -14076,13 +14080,13 @@ function main()
     registerSafeCommand('sos', commandSos)
     registerSafeCommand('sosoff', commandSosCancel)
     registerSafeCommand('r4', function()
-        radio('Состав: {crew} | Состояние: 10-4')
+        radio('Состав: {crew}. C\'4, доступен.')
     end)
     registerSafeCommand('r20', function()
-        radio('10-20: {place}. Состояние: 10-4, доступен.')
+        radio('10-20: {place}. C\'4, доступен.')
     end)
     registerSafeCommand('r3', function()
-        radio('CODE-3, требуется срочная поддержка. 10-20: {place}.')
+        radio('C\'3, требуется срочная поддержка. 10-20: {place}.')
     end)
     registerSafeCommand('rstart', commandPatrolStart)
     registerSafeCommand('rpat', commandPatrolStatus)
@@ -14122,9 +14126,9 @@ function main()
         untie = commandUntie, bc = commandBodycam, mask = commandMask,
         unmask = commandUnmask, healme = commandHealme, gpson = commandGpsTracker,
         gpsoff = commandGpsTrackerClear, sos = commandSos, sosoff = commandSosCancel,
-        r4 = function() radio('Состав: {crew} | Состояние: 10-4') end,
-        r20 = function() radio('10-20: {place}. Состояние: 10-4, доступен.') end,
-        r3 = function() radio('CODE-3, требуется срочная поддержка. 10-20: {place}.') end,
+        r4 = function() radio('Состав: {crew}. C\'4, доступен.') end,
+        r20 = function() radio('10-20: {place}. C\'4, доступен.') end,
+        r3 = function() radio('C\'3, требуется срочная поддержка. 10-20: {place}.') end,
         rstart = commandPatrolStart, rpat = commandPatrolStatus, rend = commandPatrolEnd,
         drive = commandDrive
     }
