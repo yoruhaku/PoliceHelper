@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '23102026_013704'
+LOCAL_VERSION = '23102026_041813'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -507,7 +507,7 @@ local defaults = {
         autoMaskRenew = false,
         autoEat = false,
         autoFuel = false,
-        autoReportDamager = false,
+        autoReportDamager = true,
         autoReportTracked = false,
         autoRadioReports = false,
         commandAliases = '',
@@ -803,6 +803,7 @@ weaponRpLastSentAt = -100.0
 sharedTrackingOfferId = -1
 sharedTrackingOfferName = ''
 sharedTrackingOfferUntil = 0.0
+sosLocation = { offer = nil, blip = nil, nextCheckAt = 0.0, nextColorAt = 0.0 }
 detentionOfferId = -1
 detentionOfferUntil = 0.0
 detentionOfferShownForTargetId = -1
@@ -816,6 +817,7 @@ quickMenuNeedsFocus = false
 quickMenuAttackBlockUntil = 0.0
 quickMenuClickPending = false
 quickMenuPendingAction = nil
+targetRadialMenu = { open = false, id = -1, nickname = '', ped = 0, openedAt = 0.0, clickPending = false }
 quickHotkeyWasDown = false
 animationWindow = new.bool(false)
 animationPlaying = false
@@ -1113,6 +1115,8 @@ function safeFrame(scope, callback)
     if not ok then
         window[0], quickMenu[0], animationWindow[0], interviewWindow[0] = false, false, false, false
         wantedSelector[0], ticketSelector[0], sosConfirm[0], updateConfirm[0] = false, false, false, false
+        targetRadialMenu.open = false
+        targetRadialMenu.clickPending = false
         protectedError('интерфейсе ' .. scope, err)
     end
 end
@@ -1659,6 +1663,7 @@ end
 
 function handleServerMessageEvent(color, text)
     local clean = trim(stripColorCodes(text))
+    handleSosLocationMessage(clean)
     handleServiceCommandConfirmation(clean)
     if type(handleLegalConnectionMessage) == 'function' then handleLegalConnectionMessage(clean) end
     if type(policeHelperConfirmText) == 'function' then policeHelperConfirmText(clean) end
@@ -10459,6 +10464,95 @@ function commandHealme()
     sampSendChat('/healme')
 end
 
+function validSosCoordinates(x, y, z)
+    for _, value in ipairs({ x, y, z }) do
+        if type(value) ~= 'number' or value ~= value or math.abs(value) > 20000 then return false end
+    end
+    return type(x) == 'number' and type(y) == 'number' and type(z) == 'number'
+end
+
+function clearSosLocationBlip()
+    if sosLocation.blip then pcall(removeBlip, sosLocation.blip) end
+    sosLocation.blip = nil
+    sosLocation.point = nil
+    sosLocation.nextCheckAt = 0.0
+    sosLocation.nextColorAt = 0.0
+    sosLocation.colorDisabled = false
+end
+
+function sosLocationBlipColor(now)
+    -- Плавный шестисекундный цикл; формат цвета блипа — RRGGBBAA.
+    local phase = (now % 6.0) * math.pi / 3.0
+    local red = math.floor(170 + 85 * math.sin(phase) + 0.5)
+    local green = math.floor(170 + 85 * math.sin(phase + math.pi * 2 / 3) + 0.5)
+    local blue = math.floor(170 + 85 * math.sin(phase + math.pi * 4 / 3) + 0.5)
+    return red * 16777216.0 + green * 65536.0 + blue * 256.0 + 255.0
+end
+
+function handleSosLocationMessage(clean)
+    -- Принимаем только общую рацию и сверяем автора пакета с ID в SOS.
+    local nickname, authorId, body = clean:match('^%[F%] .-([%w_]+)%[(%d+)%]:%s*(.*)$')
+    if not body then return end
+    local id, x, y, z = body:match('SOS! GPS:%s*(%d+)%. XYZ:%s*([%-%.%d]+),%s*([%-%.%d]+),%s*([%-%.%d]+)%.?$')
+    id, authorId = tonumber(id), tonumber(authorId)
+    x, y, z = tonumber(x), tonumber(y), tonumber(z)
+    if not id or id ~= authorId or not validSosCoordinates(x, y, z) then return end
+    if not isSampAvailable() or not sampIsPlayerConnected(id) then return end
+    if sampGetPlayerNickname(id) ~= nickname then return end
+    local ownOk, ownId = sampGetPlayerIdByCharHandle(PLAYER_PED)
+    if not ownOk or id == ownId then return end
+    local offer = sosLocation.offer
+    if offer and offer.id == id and offer.x == x and offer.y == y and offer.z == z then return end
+    sosLocation.offer = { id = id, nickname = nickname, x = x, y = y, z = z,
+        untilAt = os.clock() + 20.0 }
+    notify('SOS от ' .. nickname .. '[' .. id .. ']. Y – метка места вызова, N – отказаться.')
+end
+
+function acceptSosLocation()
+    local offer = sosLocation.offer
+    sosLocation.offer = nil
+    if not offer or os.clock() > offer.untilAt then return end
+    -- Сначала создаём новую метку, чтобы ошибка не уничтожила прежнюю.
+    local ok, blip = pcall(addBlipForCoord, offer.x, offer.y, offer.z)
+    if not ok or type(blip) ~= 'number' or blip == 0 then
+        notify('Не удалось установить метку SOS.')
+        return
+    end
+    clearSosLocationBlip()
+    sosLocation.blip, sosLocation.point = blip, offer
+    -- Тот же увеличенный радарный блип, что используется в FindHouse.
+    pcall(changeBlipScale, blip, 3)
+    local colorOk = pcall(changeBlipColour, blip, sosLocationBlipColor(os.clock()))
+    sosLocation.colorDisabled = not colorOk
+    sosLocation.nextCheckAt = 0.0
+    sosLocation.nextColorAt = 0.0
+    notify('Установлен блип SOS с переливом цвета. Без таймера; удалится при прибытии ближе 30 м. Это место вызова, не слежение.')
+end
+
+function updateSosLocation(now)
+    if sosLocation.offer and now > sosLocation.offer.untilAt then sosLocation.offer = nil end
+    if not sosLocation.blip then return end
+    if not isSampAvailable() then
+        clearSosLocationBlip()
+        return
+    end
+    -- Цвет обновляется не чаще 13 раз в секунду, проверка прибытия — раз в секунду.
+    if not sosLocation.colorDisabled and now >= sosLocation.nextColorAt then
+        sosLocation.nextColorAt = now + 0.08
+        local ok = pcall(changeBlipColour, sosLocation.blip, sosLocationBlipColor(now))
+        if not ok then sosLocation.colorDisabled = true end
+    end
+    if now < sosLocation.nextCheckAt then return end
+    sosLocation.nextCheckAt = now + 1.0
+    local point = sosLocation.point
+    local ok, x, y, z = pcall(getCharCoordinates, PLAYER_PED)
+    if point and ok and validSosCoordinates(x, y, z)
+        and (x - point.x)^2 + (y - point.y)^2 + (z - point.z)^2 <= 30^2 then
+        clearSosLocationBlip()
+        notify('Вы прибыли к месту вызова SOS. Метка удалена.')
+    end
+end
+
 function sendSosEscalationStep(includeRoleplay)
     if not sosEscalationActive or sosEscalationId < 0 or sequenceBusy then return false end
     refreshPatrolData()
@@ -10466,8 +10560,19 @@ function sendSosEscalationStep(includeRoleplay)
     if includeRoleplay then
         lines[#lines + 1] = '/me нажал тревожную кнопку на нагрудной радиостанции'
     end
-    lines[#lines + 1] = factionPrefix()
-        .. 'SOS! Помощь на GPS ' .. sosEscalationId .. '. {place_short}.'
+    if includeRoleplay then
+        local ok, x, y, z = pcall(getCharCoordinates, PLAYER_PED)
+        if ok and validSosCoordinates(x, y, z) then
+            -- Первый пакет без пользовательского тега: координаты должны вместиться целиком.
+            lines[#lines + 1] = string.format('/f SOS! GPS: %d. XYZ: %.1f, %.1f, %.1f',
+                sosEscalationId, x, y, z)
+        else
+            lines[#lines + 1] = factionPrefix() .. 'SOS! Помощь на GPS ' .. sosEscalationId .. '.'
+        end
+    else
+        lines[#lines + 1] = factionPrefix()
+            .. 'SOS! Помощь на GPS ' .. sosEscalationId .. '. {place_short}.'
+    end
     lines[#lines + 1] = '/su ' .. sosEscalationId .. ' 1 SOS! GPS: ' .. sosEscalationId
     if includeRoleplay then
         appendAutomaticRadioReport(lines, 'C\'0! SOS, нужна поддержка. 10-20: {place}.')
@@ -11104,6 +11209,7 @@ function updateTrackedTargetAutomation()
         and not wantedSelector[0]
         and not ticketSelector[0]
         and os.clock() > incomingCallUntil
+        and not sosLocation.offer
         and (sharedTrackingOfferId < 0 or os.clock() > sharedTrackingOfferUntil)
     if canOfferDetention and detentionOfferShownForTargetId ~= trackedTargetId then
         detentionOfferShownForTargetId = trackedTargetId
@@ -11207,6 +11313,11 @@ local function commandDetentionMode(args)
 end
 
 function handleWindowMessageEvent(message, wparam, lparam)
+    -- Запасной источник состояния, если Windows API недоступен.
+    if message == 0x0204 or message == 0x0206 then targetRadialMenu.rightMouseDown = true end
+    if message == 0x0205 or (message == 0x0006 and wparam == 0) then
+        targetRadialMenu.rightMouseDown = false
+    end
     if hotkeyCaptureTarget and message == 0x0100 then
         consumeWindowMessage(true, true)
         if wparam == vkeys.VK_ESCAPE then
@@ -11242,6 +11353,16 @@ function handleWindowMessageEvent(message, wparam, lparam)
     if quickMenu[0] and message == 0x0201 then
         quickMenuClickPending = true
         quickMenuAttackBlockUntil = os.clock() + 0.5
+    end
+
+    if targetRadialMenu.open then
+        if message == 0x0201 then
+            targetRadialMenu.clickPending = true
+            quickMenuAttackBlockUntil = os.clock() + 0.5
+        elseif message == 0x0100 and wparam == vkeys.VK_ESCAPE then
+            closeTargetRadialMenu()
+            consumeWindowMessage(true, true)
+        end
     end
 
 end
@@ -12464,7 +12585,10 @@ function drawArticleSelector(kind)
         return
     end
 
-    imgui.SetNextWindowSize(imgui.ImVec2(820, 650), imgui.Cond.FirstUseEver)
+    local display = imgui.GetIO().DisplaySize
+    imgui.SetNextWindowPos(imgui.ImVec2(display.x * 0.5, display.y * 0.5),
+        imgui.Cond.Appearing, imgui.ImVec2(0.5, 0.5))
+    imgui.SetNextWindowSize(imgui.ImVec2(math.min(820, display.x - 32), math.min(650, display.y - 32)), imgui.Cond.FirstUseEver)
     if imgui.Begin(u8(title), open, imgui.WindowFlags.NoCollapse) then
         imgui.TextWrapped(u8('Игрок: ' .. nickname .. ' [' .. id .. ']. Поиск необязателен: команда только с ID открывает полный список.'))
         imgui.SetNextItemWidth(-1)
@@ -13471,6 +13595,8 @@ function drawSettings()
         if imgui.Checkbox(u8'Использовать две клавиши##quickPair', quickUseSecond) then saveConfig() end
         if quickUseSecond[0] then drawKeyCapture('Вторая клавиша', 'quick2', quickKey2) end
         imgui.TextWrapped(u8('Текущее назначение: ' .. quickHotkeyName() .. '. Удерживайте для показа меню.'))
+        imgui.TextWrapped(u8('Круговое меню игрока: удерживайте ПКМ на игроке и нажмите ' .. quickHotkeyName()
+            .. '. Затем выберите действие мышью. Само сочетание команды не отправляет.'))
 
         section('Главное окно')
         drawKeyCapture('Основная клавиша', 'main1', mainKey1)
@@ -13672,6 +13798,217 @@ function initializeActionHotkeys()
 end
 initializeActionHotkeys()
 
+-- Круговое меню не создаёт биндов взаимодействия: клавиши только открывают выбор.
+targetRadialItems = {
+    { label = 'Умный\nрозыск', handler = commandSmartWanted },
+    { label = 'Надеть\nнаручники', handler = commandCuff },
+    { label = 'Вести\nза собой', handler = commandHold },
+    { label = 'Посадить\nв транспорт', handler = commandPutpl },
+    { label = 'Первичный\nобыск', handler = commandSearch, suffix = ' 1' },
+    { label = 'Полный\nобыск', handler = commandSearch, suffix = ' 2' },
+    { label = 'Закрыть\nменю' }
+}
+
+function closeTargetRadialMenu()
+    targetRadialMenu.open = false
+    targetRadialMenu.clickPending = false
+    targetRadialMenu.blockAttackUntilRelease = true
+    targetRadialMenu.id = -1
+    targetRadialMenu.nickname = ''
+    targetRadialMenu.ped = 0
+    quickMenuAttackBlockUntil = os.clock() + 0.5
+end
+
+function targetRadialRightMouseDown()
+    -- Игровое состояние ПКМ может залипнуть, если отпускание перехватил интерфейс.
+    -- Старший бит Windows API показывает физическое удержание, а не прошлое нажатие.
+    if targetRadialMenu.mouseApi == nil then
+        local ok, api = pcall(function()
+            pcall(ffi.cdef, 'short __stdcall GetAsyncKeyState(int vKey);')
+            local user32 = ffi.load('user32')
+            return { library = user32, read = user32.GetAsyncKeyState }
+        end)
+        targetRadialMenu.mouseApi = ok and api or false
+    end
+    if targetRadialMenu.mouseApi then
+        local ok, state = pcall(targetRadialMenu.mouseApi.read, vkeys.VK_RBUTTON)
+        if ok then return tonumber(state) < 0 end
+    end
+    return targetRadialMenu.rightMouseDown == true
+end
+
+function targetRadialPlayerIsValid(snapshot)
+    if not snapshot or not isSampAvailable() or not sampIsPlayerConnected(snapshot.id) then return false end
+    local nameOk, nickname = pcall(sampGetPlayerNickname, snapshot.id)
+    if not nameOk or nickname ~= snapshot.nickname then return false end
+    local found, ped = sampGetCharHandleBySampPlayerId(snapshot.id)
+    return found and ped == snapshot.ped and doesCharExist(ped) and not isCharDead(ped)
+end
+
+function openTargetRadialMenu()
+    if not isSampAvailable() then return false end
+    local aimed, ped = getCharPlayerIsTargeting(PLAYER_HANDLE)
+    if not aimed or not ped or not doesCharExist(ped) or ped == PLAYER_PED then
+        notify('Наведите ПКМ на игрока и повторите сочетание.')
+        return false
+    end
+    local found, id = sampGetPlayerIdByCharHandle(ped)
+    if not found or not sampIsPlayerConnected(id) then
+        notify('Под прицелом нет доступного игрока SA-MP.')
+        return false
+    end
+    local nickname = sampGetPlayerNickname(id)
+    if type(nickname) ~= 'string' or nickname == '' or isCharDead(ped) then return false end
+    -- Цель принадлежит только этому открытию меню и не меняет общий выбранный ID.
+    targetRadialMenu.id = id
+    targetRadialMenu.nickname = nickname
+    targetRadialMenu.ped = ped
+    targetRadialMenu.openedAt = os.clock()
+    targetRadialMenu.clickPending = false
+    targetRadialMenu.open = true
+    quickMenu[0] = false
+    quickMenuClickPending = false
+    quickMenuBlocked = true
+    return true
+end
+
+function executeTargetRadialAction(snapshot, index)
+    local item = targetRadialItems[index]
+    if not item or not item.handler then return end
+    if sampIsChatInputActive() or sampIsDialogActive() or isPauseMenuActive()
+        or isSampfuncsConsoleActive() then return end
+    if not targetRadialPlayerIsValid(snapshot) then
+        notify('Игрок вышел из зоны видимости или сменился. Откройте круговое меню заново.')
+        return
+    end
+    item.handler(tostring(snapshot.id) .. (item.suffix or ''))
+end
+
+function targetRadialSector(dx, dy, innerRadius, outerRadius, count)
+    local distance = math.sqrt(dx * dx + dy * dy)
+    if distance < innerRadius or distance > outerRadius then return nil end
+    local step = math.pi * 2 / count
+    local angle = (math.atan2(dy, dx) + math.pi * 0.5 + step * 0.5) % (math.pi * 2)
+    return math.floor(angle / step) + 1
+end
+
+function targetRadialCenteredText(draw, text, x, y, color)
+    -- Каждая строка центрируется отдельно, включая подписи с разной длиной.
+    local lines = {}
+    for line in (text .. '\n'):gmatch('(.-)\n') do lines[#lines + 1] = line end
+    local lineHeight = imgui.GetFontSize()
+    for index, line in ipairs(lines) do
+        local encoded = u8(line)
+        local size = imgui.CalcTextSize(encoded)
+        draw:AddTextFontPtr(imgui.GetFont(), lineHeight, imgui.ImVec2(x - size.x * 0.5,
+            y - #lines * lineHeight * 0.5 + (index - 1) * lineHeight), color, encoded)
+    end
+end
+
+function targetRadialTextPanel(draw, text, x, y, maxWidth)
+    -- Непрозрачная подложка отделяет подпись от любого игрового фона.
+    imgui.SetWindowFontScale(1.1)
+    local natural = imgui.CalcTextSize(u8(text))
+    local scale = 1.1 * math.min(1.0, math.max(1, maxWidth - 32) / math.max(1, natural.x))
+    imgui.SetWindowFontScale(scale)
+    local size = imgui.CalcTextSize(u8(text))
+    local halfWidth, halfHeight = (size.x + 32) * 0.5, (size.y + 18) * 0.5
+    local left = imgui.ImVec2(x - halfWidth, y - halfHeight)
+    local right = imgui.ImVec2(x + halfWidth, y + halfHeight)
+    draw:AddRectFilled(left, right, imgui.U32(0.035, 0.055, 0.085, 1.0), 8)
+    draw:AddRect(left, right, imgui.U32(0.25, 0.49, 0.77, 1.0), 8)
+    targetRadialCenteredText(draw, text, x, y, imgui.U32(1.0, 1.0, 1.0, 1.0))
+    imgui.SetWindowFontScale(1.0)
+end
+
+function drawTargetRadialMenu(context)
+    context.HideCursor = false
+    context.LockPlayer = false
+    if not targetRadialPlayerIsValid(targetRadialMenu) then closeTargetRadialMenu(); return end
+    local io = imgui.GetIO()
+    local sw, sh = io.DisplaySize.x, io.DisplaySize.y
+    if sw < 200 or sh < 200 then closeTargetRadialMenu(); return end
+    imgui.SetNextWindowPos(imgui.ImVec2(0, 0), imgui.Cond.Always)
+    imgui.SetNextWindowSize(imgui.ImVec2(sw, sh), imgui.Cond.Always)
+    local flags = imgui.WindowFlags.NoTitleBar + imgui.WindowFlags.NoResize
+        + imgui.WindowFlags.NoMove + imgui.WindowFlags.NoScrollbar
+        + imgui.WindowFlags.NoSavedSettings + imgui.WindowFlags.NoCollapse
+        + imgui.WindowFlags.NoBackground
+    if imgui.Begin('##policeTargetRadialMenu', nil, flags) then
+        local widest = 0
+        for _, item in ipairs(targetRadialItems) do
+            for line in item.label:gmatch('[^\n]+') do
+                widest = math.max(widest, imgui.CalcTextSize(u8(line)).x)
+            end
+        end
+        local desiredRadius = math.max(225, widest * 2.1)
+        local outerRadius = math.min(desiredRadius, sw * 0.46, (sh - 100) * 0.5)
+        local fontScale = math.min(1.0, outerRadius / desiredRadius)
+        imgui.SetWindowFontScale(fontScale)
+        local innerRadius = outerRadius * 0.36
+        local labelRadius = outerRadius * 0.70
+        local cx, cy = sw * 0.5, sh * 0.5
+        local count, draw = #targetRadialItems, imgui.GetWindowDrawList()
+        local step = math.pi * 2 / count
+        local hovered = targetRadialSector(io.MousePos.x - cx, io.MousePos.y - cy,
+            innerRadius, outerRadius, count)
+        local background = imgui.U32(0.045, 0.065, 0.09, 0.94)
+        local normal = imgui.U32(0.10, 0.20, 0.33, 0.96)
+        local highlighted = imgui.U32(0.18, 0.46, 0.76, 1.0)
+        local cancel = imgui.U32(0.52, 0.18, 0.18, 1.0)
+        local white = imgui.U32(0.95, 0.97, 1.0, 1.0)
+        local center = imgui.ImVec2(cx, cy)
+        draw:AddCircleFilled(center, outerRadius + 5, background, 96)
+        for index, item in ipairs(targetRadialItems) do
+            local angle = -math.pi * 0.5 + (index - 1) * step
+            local a, b = angle - step * 0.5 + 0.018, angle + step * 0.5 - 0.018
+            local color = hovered == index and (item.handler and highlighted or cancel) or normal
+            -- Кольцо из выпуклых четырёхугольников, без прямого доступа к памяти ImGui.
+            for segment = 0, 15 do
+                local left = a + (b - a) * segment / 16
+                local right = a + (b - a) * (segment + 1) / 16
+                draw:AddQuadFilled(
+                    imgui.ImVec2(cx + math.cos(left) * innerRadius, cy + math.sin(left) * innerRadius),
+                    imgui.ImVec2(cx + math.cos(left) * outerRadius, cy + math.sin(left) * outerRadius),
+                    imgui.ImVec2(cx + math.cos(right) * outerRadius, cy + math.sin(right) * outerRadius),
+                    imgui.ImVec2(cx + math.cos(right) * innerRadius, cy + math.sin(right) * innerRadius), color)
+            end
+            targetRadialCenteredText(draw, item.label, cx + math.cos(angle) * labelRadius,
+                cy + math.sin(angle) * labelRadius, white)
+        end
+        draw:AddCircleFilled(center, innerRadius - 3, background, 64)
+        imgui.SetWindowFontScale(1.0)
+        targetRadialTextPanel(draw, targetRadialMenu.nickname:gsub('_', ' ') .. ' [' .. targetRadialMenu.id .. ']',
+            cx, cy - outerRadius - 27, sw - 24)
+        targetRadialTextPanel(draw, 'ЛКМ – выбрать   |   Esc – закрыть', cx, cy + outerRadius + 27, sw - 24)
+        if targetRadialMenu.clickPending then
+            targetRadialMenu.clickPending = false
+            local snapshot = { id = targetRadialMenu.id, nickname = targetRadialMenu.nickname, ped = targetRadialMenu.ped }
+            closeTargetRadialMenu()
+            if hovered and targetRadialItems[hovered].handler then
+                -- Выбор мышью исполняется основным потоком, не callback отрисовки.
+                quickMenuPendingAction = function() executeTargetRadialAction(snapshot, hovered) end
+            end
+        end
+    end
+    imgui.End()
+end
+
+imgui.OnFrame(
+    function() return targetRadialMenu.open end,
+    function(context) safeInterfaceFrame('кругового меню игрока', function() drawTargetRadialMenu(context) end) end
+)
+
+function quickMenuWindowHeight(screenHeight)
+    local rows = #quickActionPages.main
+    for _, items in pairs(quickActionPages) do rows = math.max(rows, #items) end
+    local style = imgui.GetStyle()
+    -- Высота зависит от числа кнопок, шрифта и реальных отступов темы.
+    local required = style.WindowPadding.y * 2 + imgui.GetTextLineHeight()
+        + style.ItemSpacing.y * 2 + 2 + rows * (30 + style.ItemSpacing.y)
+    return math.min(math.max(370, required), math.max(100, screenHeight - 32)), required
+end
+
 function drawQuickMenu(context)
     context.HideCursor = false
     context.LockPlayer = false
@@ -13684,7 +14021,8 @@ function drawQuickMenu(context)
     local expanded = submenuActions ~= nil
     local windowWidth = expanded and 535 or 270
     -- Постоянная высота не даёт окну смещаться при переходе между разделами.
-    local windowHeight = 370
+    local windowHeight, requiredHeight = quickMenuWindowHeight(sh)
+    if windowHeight < requiredHeight then windowWidth = windowWidth + imgui.GetStyle().ScrollbarSize end
     -- Центрируется всё текущее окно, включая раскрытую правую колонку.
     imgui.SetNextWindowPos(imgui.ImVec2(sw * 0.5, sh * 0.5),
         imgui.Cond.Always, imgui.ImVec2(0.5, 0.5))
@@ -13694,7 +14032,7 @@ function drawQuickMenu(context)
         quickMenuNeedsFocus = false
     end
     local flags = imgui.WindowFlags.NoTitleBar + imgui.WindowFlags.NoResize
-        + imgui.WindowFlags.NoMove + imgui.WindowFlags.NoScrollbar
+        + imgui.WindowFlags.NoMove
         + imgui.WindowFlags.NoSavedSettings + imgui.WindowFlags.NoCollapse
     if imgui.Begin('##policeQuickMenu', nil, flags) then
         imgui.BeginGroup()
@@ -13864,13 +14202,16 @@ function drawSosConfirm(context)
     context.HideCursor = false
     context.LockPlayer = true
     local io = imgui.GetIO()
+    local description = u8'Первый запрос SOS в /f содержит GPS ID и координаты места вызова. Получатели с PoliceHelper могут нажать Y для метки или N для отказа. Затем ещё два коротких запроса помощи и /su с одной звездой по причине SOS! GPS: ID. Повторы выполняются после подтверждения сервера.'
+    local textHeight = imgui.CalcTextSize(description, nil, false, 398).y
     imgui.SetNextWindowPos(imgui.ImVec2(io.DisplaySize.x * 0.5, io.DisplaySize.y * 0.5),
         imgui.Cond.Always, imgui.ImVec2(0.5, 0.5))
-    imgui.SetNextWindowSize(imgui.ImVec2(430, 170), imgui.Cond.Always)
+    imgui.SetNextWindowSize(imgui.ImVec2(430, math.min(io.DisplaySize.y - 32,
+        math.max(170, textHeight + imgui.GetTextLineHeightWithSpacing() + 85))), imgui.Cond.Always)
     local flags = imgui.WindowFlags.NoResize + imgui.WindowFlags.NoMove
         + imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoSavedSettings
     if imgui.Begin(u8'Тревожная кнопка', sosConfirm, flags) then
-        imgui.TextWrapped(u8'Три раза подряд будут отправлены короткий запрос помощи в /f и /su с одной звездой по причине SOS! GPS: ID. Каждый повтор выполняется только после подтверждения сервера.')
+        imgui.TextWrapped(description)
         imgui.Spacing()
         if imgui.Button(u8'Активировать', imgui.ImVec2(195, 32)) then
             sosConfirm[0] = false
@@ -13973,6 +14314,7 @@ end
 
 function onScriptTerminate(script, quitGame)
     if script == thisScript() then
+        clearSosLocationBlip()
         cancelSequence(true)
         clearTrackedTarget(true)
         stopStrobes()
@@ -14238,7 +14580,12 @@ function main()
             safeRuntimeCall('RP-отыгровок оружия', updateWeaponRoleplay)
             nextWeaponCheck = os.clock() + 0.1
         end
-        if quickMenu[0] or os.clock() < quickMenuAttackBlockUntil then
+        if targetRadialMenu.blockAttackUntilRelease and not isKeyDown(vkeys.VK_LBUTTON) then
+            targetRadialMenu.blockAttackUntilRelease = false
+            quickMenuAttackBlockUntil = os.clock() + 0.5
+        end
+        if quickMenu[0] or targetRadialMenu.open or targetRadialMenu.blockAttackUntilRelease
+            or os.clock() < quickMenuAttackBlockUntil then
             -- После выбора атака/выстрел дополнительно блокируются ещё 500 мс.
             pcall(setGameKeyState, 17, 0)
         end
@@ -14247,21 +14594,29 @@ function main()
             and not isSampfuncsConsoleActive()
             and not isPauseMenuActive()
 
+        if targetRadialMenu.open and (not inputFree or not doesCharExist(PLAYER_PED)
+            or isCharDead(PLAYER_PED) or runtimeNow - targetRadialMenu.openedAt > 30.0) then
+            closeTargetRadialMenu()
+        end
+
         local actionHotkeysAllowed = inputFree
             and os.clock() >= hotkeyCaptureBlockUntil
             and not hotkeyCaptureTarget
             and not window[0]
             and not quickMenu[0]
+            and not targetRadialMenu.open
             and not wantedSelector[0]
             and not ticketSelector[0]
             and not sosConfirm[0]
             and not updateConfirm[0]
         local incomingCallActive = runtimeNow <= incomingCallUntil
+        updateSosLocation(runtimeNow)
+        local sosLocationOfferActive = sosLocation.offer ~= nil
         local sharedTrackingOfferActive = sharedTrackingOfferId >= 0
             and runtimeNow <= sharedTrackingOfferUntil
         local detentionOfferActive = detentionOfferId >= 0
             and runtimeNow <= detentionOfferUntil
-        local promptChoiceActive = incomingCallActive or sharedTrackingOfferActive
+        local promptChoiceActive = incomingCallActive or sosLocationOfferActive or sharedTrackingOfferActive
             or detentionOfferActive
         if actionHotkeysAllowed then
             if incomingCallActive then
@@ -14269,6 +14624,13 @@ function main()
                     safeRuntimeCall('ответа на звонок', commandPhoneAccept)
                 elseif wasKeyPressed(vkeys.VK_N) then
                     safeRuntimeCall('отклонения звонка', commandPhoneDecline)
+                end
+            elseif sosLocationOfferActive then
+                if wasKeyPressed(vkeys.VK_Y) then
+                    safeRuntimeCall('метки SOS', acceptSosLocation)
+                elseif wasKeyPressed(vkeys.VK_N) then
+                    sosLocation.offer = nil
+                    notify('Метка SOS отклонена.')
                 end
             elseif sharedTrackingOfferActive then
                 if wasKeyPressed(vkeys.VK_Y) then
@@ -14410,6 +14772,7 @@ function main()
                 mainKey1[0], mainKey2[0], mainUseSecond[0]
             ))
             and not quickMenu[0]
+            and not targetRadialMenu.open
             and not sosConfirm[0]
             and not updateConfirm[0]
             and not sampIsChatInputActive()
@@ -14431,18 +14794,26 @@ function main()
                 quickKey1[0], quickKey2[0], quickUseSecond[0]
             ))
             and not quickMenuBlocked
+            and not targetRadialMenu.open
             and not window[0]
             and not wantedSelector[0]
             and not ticketSelector[0]
             and not sosConfirm[0]
+            and not updateConfirm[0]
+            and not interviewWindow[0]
+            and not animationWindow[0]
             and not sampIsChatInputActive()
             and not sampIsDialogActive()
             and not isSampfuncsConsoleActive()
             and not isPauseMenuActive()
         then
-            quickMenuPage = 'main'
-            quickMenuNeedsFocus = true
-            quickMenu[0] = true
+            if targetRadialRightMouseDown() then
+                safeRuntimeCall('открытия кругового меню игрока', openTargetRadialMenu)
+            else
+                quickMenuPage = 'main'
+                quickMenuNeedsFocus = true
+                quickMenu[0] = true
+            end
         end
         if quickMenu[0] and (not quickHotkeyDown
             or sampIsChatInputActive()
