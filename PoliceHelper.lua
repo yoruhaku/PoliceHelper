@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '23102026_041813'
+LOCAL_VERSION = '23102026_043819'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -1947,7 +1947,7 @@ function handleServerMessageEvent(color, text)
         sosEscalationAwaiting = false
         sosEscalationConfirmed = sosEscalationConfirmed + 1
         sosEscalationExpiresAt = 0.0
-        if sosEscalationConfirmed >= 3 or sosWantedLevel >= 6 then
+        if sosEscalationConfirmed >= 2 or sosWantedLevel >= 6 then
             sosEscalationActive = false
             sosEscalationId = -1
             sosEscalationConfirmed = 0
@@ -10563,19 +10563,18 @@ function sendSosEscalationStep(includeRoleplay)
     if includeRoleplay then
         local ok, x, y, z = pcall(getCharCoordinates, PLAYER_PED)
         if ok and validSosCoordinates(x, y, z) then
-            -- Первый пакет без пользовательского тега: координаты должны вместиться целиком.
+            -- Доклады SOS отправляются без пользовательского тега.
             lines[#lines + 1] = string.format('/f SOS! GPS: %d. XYZ: %.1f, %.1f, %.1f',
                 sosEscalationId, x, y, z)
         else
-            lines[#lines + 1] = factionPrefix() .. 'SOS! Помощь на GPS ' .. sosEscalationId .. '.'
+            lines[#lines + 1] = '/f SOS! Помощь на GPS ' .. sosEscalationId .. '.'
         end
     else
-        lines[#lines + 1] = factionPrefix()
-            .. 'SOS! Помощь на GPS ' .. sosEscalationId .. '. {place_short}.'
+        lines[#lines + 1] = '/f SOS! Помощь на GPS ' .. sosEscalationId .. '. {place_short}.'
     end
     lines[#lines + 1] = '/su ' .. sosEscalationId .. ' 1 SOS! GPS: ' .. sosEscalationId
-    if includeRoleplay then
-        appendAutomaticRadioReport(lines, 'C\'0! SOS, нужна поддержка. 10-20: {place}.')
+    if includeRoleplay and autoRadioReports[0] then
+        lines[#lines + 1] = '/r C\'0! SOS, нужна поддержка. 10-20: {place}.'
     end
     sosEscalationAwaiting = true
     sosEscalationNextAt = 0.0
@@ -14202,7 +14201,7 @@ function drawSosConfirm(context)
     context.HideCursor = false
     context.LockPlayer = true
     local io = imgui.GetIO()
-    local description = u8'Первый запрос SOS в /f содержит GPS ID и координаты места вызова. Получатели с PoliceHelper могут нажать Y для метки или N для отказа. Затем ещё два коротких запроса помощи и /su с одной звездой по причине SOS! GPS: ID. Повторы выполняются после подтверждения сервера.'
+    local description = u8'Два запроса SOS в /f без пользовательского тега. Первый содержит GPS ID и координаты места вызова: Y – поставить блип, N – отказаться. Второй – короткий запрос помощи. После каждого /su с одной звездой по причине SOS! GPS: ID. Повтор – после подтверждения сервера.'
     local textHeight = imgui.CalcTextSize(description, nil, false, 398).y
     imgui.SetNextWindowPos(imgui.ImVec2(io.DisplaySize.x * 0.5, io.DisplaySize.y * 0.5),
         imgui.Cond.Always, imgui.ImVec2(0.5, 0.5))
