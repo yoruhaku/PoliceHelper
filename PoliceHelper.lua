@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '23102026_043819'
+LOCAL_VERSION = '23102026_191739'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -12009,6 +12009,16 @@ function quickHotkeyName()
     return keyPairName(quickKey1, quickKey2, quickUseSecond)
 end
 
+function targetRadialHotkeyName()
+    return 'ПКМ + ' .. quickHotkeyName()
+end
+
+function targetRadialMenuHint()
+    return 'Меню игрока: ' .. targetRadialHotkeyName()
+        .. '. Наведите ПКМ на игрока и нажмите ' .. quickHotkeyName()
+        .. '. ЛКМ – выбрать, Esc – закрыть.'
+end
+
 function mainHotkeyName()
     return keyPairName(mainKey1, mainKey2, mainUseSecond)
 end
@@ -12225,6 +12235,7 @@ end
 local function drawCommands()
     drawPageHeader('Команды', 'Команды сервера, сокращения и дополнительные возможности PoliceHelper')
     commandListMode = drawCenteredTabs({ 'Серверные команды', 'Команды PoliceHelper' }, commandListMode, 'commandMode', 230)
+    imgui.TextWrapped(u8(targetRadialMenuHint()))
     imgui.Spacing()
     imgui.Separator()
     imgui.Spacing()
@@ -13594,8 +13605,8 @@ function drawSettings()
         if imgui.Checkbox(u8'Использовать две клавиши##quickPair', quickUseSecond) then saveConfig() end
         if quickUseSecond[0] then drawKeyCapture('Вторая клавиша', 'quick2', quickKey2) end
         imgui.TextWrapped(u8('Текущее назначение: ' .. quickHotkeyName() .. '. Удерживайте для показа меню.'))
-        imgui.TextWrapped(u8('Круговое меню игрока: удерживайте ПКМ на игроке и нажмите ' .. quickHotkeyName()
-            .. '. Затем выберите действие мышью. Само сочетание команды не отправляет.'))
+        imgui.TextWrapped(u8(targetRadialMenuHint()))
+        imgui.TextWrapped(u8'Обычное быстрое меню открывается без ПКМ. В меню игрока сочетание только открывает выбор; команда отправляется после выбора действия мышью.')
 
         section('Главное окно')
         drawKeyCapture('Основная клавиша', 'main1', mainKey1)
@@ -13636,14 +13647,20 @@ function drawSidebar()
         if active then imgui.PopStyleColor() end
         imgui.Dummy(imgui.ImVec2(0, 2))
     end
-    imgui.SetCursorPosY(imgui.GetWindowHeight() - 145)
+    local footerLines = { 'Команда: /ph', 'Открытие окна: ' .. mainHotkeyName(),
+        'Быстрое меню: ' .. quickHotkeyName(), 'Меню игрока: ' .. targetRadialHotkeyName() }
+    local footerWidth = imgui.GetContentRegionAvail().x
+    local footerHeight = 16
+    for _, line in ipairs(footerLines) do
+        footerHeight = footerHeight + imgui.CalcTextSize(u8(line), nil, false, footerWidth).y
+            + imgui.GetStyle().ItemSpacing.y
+    end
+    -- Подсказки не перекрывают навигацию даже при увеличенном шрифте.
+    imgui.SetCursorPosY(math.max(imgui.GetCursorPosY() + 12,
+        imgui.GetWindowHeight() - footerHeight - imgui.GetStyle().WindowPadding.y))
     imgui.Separator()
     imgui.Dummy(imgui.ImVec2(0, 3))
-    imgui.TextDisabled(u8'Команда: /ph')
-    imgui.TextDisabled(u8'Открытие окна:')
-    imgui.TextDisabled(u8(mainHotkeyName()))
-    imgui.TextDisabled(u8'Быстрое меню:')
-    imgui.TextDisabled(u8(quickHotkeyName()))
+    for _, line in ipairs(footerLines) do imgui.TextWrapped(u8(line)) end
     imgui.EndChild()
 end
 
@@ -13799,12 +13816,12 @@ initializeActionHotkeys()
 
 -- Круговое меню не создаёт биндов взаимодействия: клавиши только открывают выбор.
 targetRadialItems = {
-    { label = 'Умный\nрозыск', handler = commandSmartWanted },
-    { label = 'Надеть\nнаручники', handler = commandCuff },
-    { label = 'Вести\nза собой', handler = commandHold },
-    { label = 'Посадить\nв транспорт', handler = commandPutpl },
-    { label = 'Первичный\nобыск', handler = commandSearch, suffix = ' 1' },
-    { label = 'Полный\nобыск', handler = commandSearch, suffix = ' 2' },
+    { label = 'Умный\nрозыск\n/sus ID', handler = commandSmartWanted },
+    { label = 'Надеть\nнаручники\n/cuff ID', handler = commandCuff },
+    { label = 'Вести\nза собой\n/hold ID', handler = commandHold },
+    { label = 'Посадить\nв транспорт\n/putpl ID', handler = commandPutpl },
+    { label = 'Первичный\nобыск\n/search ID 1', handler = commandSearch, suffix = ' 1' },
+    { label = 'Полный\nобыск\n/search ID 2', handler = commandSearch, suffix = ' 2' },
     { label = 'Закрыть\nменю' }
 }
 
@@ -14005,6 +14022,10 @@ function quickMenuWindowHeight(screenHeight)
     -- Высота зависит от числа кнопок, шрифта и реальных отступов темы.
     local required = style.WindowPadding.y * 2 + imgui.GetTextLineHeight()
         + style.ItemSpacing.y * 2 + 2 + rows * (30 + style.ItemSpacing.y)
+    local rootHeight = style.WindowPadding.y * 2 + imgui.GetTextLineHeight()
+        + style.ItemSpacing.y * 5 + 6 + #quickActionPages.main * (30 + style.ItemSpacing.y)
+        + imgui.CalcTextSize(u8(targetRadialMenuHint()), nil, false, 250).y
+    required = math.max(required, rootHeight)
     return math.min(math.max(370, required), math.max(100, screenHeight - 32)), required
 end
 
@@ -14053,6 +14074,11 @@ function drawQuickMenu(context)
             if selected then imgui.PopStyleColor(3) end
             if hovered then quickMenuPage = item.page end
         end
+        imgui.Dummy(imgui.ImVec2(0, 5))
+        imgui.Separator()
+        imgui.PushTextWrapPos(rootX + 250)
+        imgui.TextUnformatted(u8(targetRadialMenuHint()))
+        imgui.PopTextWrapPos()
         imgui.EndGroup()
 
         if expanded then
@@ -14476,6 +14502,7 @@ function main()
     for commandName in pairs(editorBuiltInHandlers) do editorReservedCommands[commandName] = true end
     registerAllEditorCommands()
     notify('Загружен. Главное меню: /ph или ' .. mainHotkeyName() .. '. Быстрый доступ: удерживать ' .. quickHotkeyName() .. '.')
+    notify('Меню игрока: ' .. targetRadialHotkeyName() .. '. Наведитесь ПКМ на игрока, затем нажмите ' .. quickHotkeyName() .. '.')
     if UPDATE_MANIFEST_URL ~= '' then
         lua_thread.create(function()
             while not isSampAvailable() or not sampIsLocalPlayerSpawned() do wait(500) end
