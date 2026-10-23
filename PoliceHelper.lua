@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '23102026_191739'
+LOCAL_VERSION = '24102026_003851'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -1850,7 +1850,8 @@ function handleServerMessageEvent(color, text)
     end
 
     if autoReportDamager[0] then
-        local killerId = tonumber(clean:match('^%[Всем постам%].-%[(%d+)%]%s+совершил убийство%s+|'))
+        local killerNickname, killerId = clean:match('^%[Всем постам%]%s+([%w_]+)%[(%d+)%]%s+совершил убийство%s+|')
+        killerId = tonumber(killerId)
         if killerId then
             local now = os.clock()
             local recent = damagerKillTimes[killerId] or {}
@@ -1869,7 +1870,7 @@ function handleServerMessageEvent(color, text)
                 damagerKillTimes[killerId] = {}
                 lua_thread.create(function()
                     wait(100)
-                    sampSendChat('/re Дамагер! ID: ' .. killerId)
+                    sampSendChat('/re Дамагер! Ник: ' .. killerNickname .. '. ID: ' .. killerId)
                 end)
             end
         end
