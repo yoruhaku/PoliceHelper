@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '24102026_003851'
+LOCAL_VERSION = '24102026_015259'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -12236,7 +12236,6 @@ end
 local function drawCommands()
     drawPageHeader('Команды', 'Команды сервера, сокращения и дополнительные возможности PoliceHelper')
     commandListMode = drawCenteredTabs({ 'Серверные команды', 'Команды PoliceHelper' }, commandListMode, 'commandMode', 230)
-    imgui.TextWrapped(u8(targetRadialMenuHint()))
     imgui.Spacing()
     imgui.Separator()
     imgui.Spacing()
@@ -13661,7 +13660,9 @@ function drawSidebar()
         imgui.GetWindowHeight() - footerHeight - imgui.GetStyle().WindowPadding.y))
     imgui.Separator()
     imgui.Dummy(imgui.ImVec2(0, 3))
+    imgui.PushStyleColor(imgui.Col.Text, imgui.GetStyle().Colors[imgui.Col.TextDisabled])
     for _, line in ipairs(footerLines) do imgui.TextWrapped(u8(line)) end
+    imgui.PopStyleColor()
     imgui.EndChild()
 end
 
