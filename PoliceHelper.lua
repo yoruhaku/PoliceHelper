@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '24102026_015259'
+LOCAL_VERSION = '09112026_233453'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -508,6 +508,7 @@ local defaults = {
         autoEat = false,
         autoFuel = false,
         autoReportDamager = true,
+        autoReportDamagerRelease = '',
         autoReportTracked = false,
         autoRadioReports = false,
         commandAliases = '',
@@ -571,6 +572,12 @@ local function loadConfig()
 end
 
 loadConfig()
+
+-- При первом запуске каждой версии включаем репорт, затем сохраняем выбор пользователя.
+if config.main.autoReportDamagerRelease ~= LOCAL_VERSION then
+    config.main.autoReportDamager = true
+    config.main.autoReportDamagerRelease = LOCAL_VERSION
+end
 
 -- Переводим только прежние стандартные значения, не затрагивая выбранную пользователем задержку.
 loadedDelayDefaultVersion = loadedConfigKeys.delayDefaultVersion
@@ -701,7 +708,7 @@ actionHotkeys = {}
 commandsSettingsPage = 1
 roleplayOverrides = {}
 roleplayEditorSearchBuf = newBuffer(96, '')
-roleplayEditorBodyBuf = newBuffer(4096, '')
+roleplayEditorBodyBuf = newBuffer(16384, '')
 roleplayEditorSelected = ''
 local ticketAmount = new.int(15000)
 local wantedLevel = new.int(1)
@@ -953,6 +960,7 @@ end
 commandAliases = parseEditorEntries(config.main.commandAliases, 'target')
 customCommands = parseEditorEntries(config.main.customCommands, 'body')
 roleplayOverrides = parseEditorEntries(config.main.roleplayOverrides, 'body')
+roleplayPendingSequences = {}
 actionHotkeys = parseActionHotkeys(config.main.actionHotkeys)
 
 roleplayCatalog = {
@@ -1241,7 +1249,7 @@ local function saveConfig()
     local file = io.open(CONFIG_PATH, 'wb')
     if not file then return false end
     file:write('[main]\r\n')
-    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoMaskRenew', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportTracked', 'autoRadioReports', 'commandAliases', 'customCommands', 'roleplayOverrides', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'whiteMaskedChatIds', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'hideFamilyChat', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
+    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoMaskRenew', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportDamagerRelease', 'autoReportTracked', 'autoRadioReports', 'commandAliases', 'customCommands', 'roleplayOverrides', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'whiteMaskedChatIds', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'hideFamilyChat', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
         local value = tostring(config.main[key]):gsub('[\r\n]', '')
         file:write(key .. '=' .. value .. '\r\n')
     end
@@ -1644,9 +1652,9 @@ function handleServiceCommandConfirmation(clean)
             if enabled or disabled then
                 serviceCommandPending.form = nil
                 if enabled then
-                    sampSendChat(configuredRoleplayLine('form_on', 1, '/me открыл служебную раздевалку через панель планшета'))
+                    sendConfiguredRoleplay('form_on', 1, '/me открыл служебную раздевалку через панель планшета')
                 else
-                    sampSendChat(configuredRoleplayLine('form_off', 1, '/me закрыл доступ к служебной раздевалке через планшет'))
+                    sendConfiguredRoleplay('form_off', 1, '/me закрыл доступ к служебной раздевалке через планшет')
                 end
             end
         end
@@ -1656,7 +1664,7 @@ function handleServiceCommandConfirmation(clean)
         local nickname, reason = clean:match('^Вы сняли розыск с ([%w_]+) по причине:%s*(.+)$')
         if nickname == gps.nickname and trim(reason or ''):gsub('%.$', '') == 'GPS OFF' then
             serviceCommandPending.gps_clear = nil
-            sampSendChat(configuredRoleplayLine('gpsoff', 1, '/me отключил GPS-трекер и удалил служебную отметку из базы МВД'))
+            sendConfiguredRoleplay('gpsoff', 1, '/me отключил GPS-трекер и удалил служебную отметку из базы МВД')
         end
     end
 end
@@ -1690,9 +1698,9 @@ function handleServerMessageEvent(color, text)
             departmentDoorPending = false
             departmentDoorPendingUntil = 0.0
             if clean == 'Вы открыли дверь' then
-                sampSendChat(configuredRoleplayLine('door_open', 1, '/me нажал кнопку на служебной панели управления и открыл дверь'))
+                sendConfiguredRoleplay('door_open', 1, '/me нажал кнопку на служебной панели управления и открыл дверь')
             else
-                sampSendChat(configuredRoleplayLine('door_close', 1, '/me нажал кнопку на служебной панели управления и закрыл дверь'))
+                sendConfiguredRoleplay('door_close', 1, '/me нажал кнопку на служебной панели управления и закрыл дверь')
             end
         end
     end
@@ -1763,7 +1771,7 @@ function handleServerMessageEvent(color, text)
                 holdRpPendingId = -1
                 holdRpPendingNickname = ''
                 holdRpPendingUntil = 0.0
-                sampSendChat(configuredRoleplayLine('hold', 1, '/me аккуратно взял задержанного под руку и повёл за собой'))
+                sendConfiguredRoleplay('hold', 1, '/me аккуратно взял задержанного под руку и повёл за собой')
             end
         end
     end
@@ -1783,9 +1791,9 @@ function handleServerMessageEvent(color, text)
                 detentionRpPendingId = -1
                 detentionRpPendingNickname = ''
                 detentionRpPendingUntil = 0.0
-                sampSendChat(configuredRoleplayLine(
+                sendConfiguredRoleplay(
                     'y', 1, '/me активировал режим задержания в служебном планшете'
-                ))
+                )
             end
         end
     end
@@ -1805,7 +1813,7 @@ function handleServerMessageEvent(color, text)
                 putplRpPending = false
                 putplRpPendingActor = ''
                 putplRpPendingUntil = 0.0
-                sampSendChat(configuredRoleplayLine('putpl', 2, '/me придерживая задержанного, помог ему сесть на заднее сиденье'))
+                sendConfiguredRoleplay('putpl', 2, '/me придерживая задержанного, помог ему сесть на заднее сиденье')
                 putplRpClosePending = true
                 putplRpCloseAt = os.clock() + math.max(0, delayMs[0]) / 1000.0
             end
@@ -1836,12 +1844,12 @@ function handleServerMessageEvent(color, text)
                 pullRpPendingUntil = 0.0
                 pullRpPendingFirst = ''
                 pullRpPendingSecond = ''
-                sampSendChat(configuredRoleplayLine('pull', 1, firstLine))
+                sendConfiguredRoleplay('pull', 1, firstLine)
                 if secondLine ~= '' then
                     lua_thread.create(function()
                         wait(math.max(0, delayMs[0]))
                         if isSampAvailable() then
-                            sampSendChat(configuredRoleplayLine('pull', 2, secondLine))
+                            sendConfiguredRoleplay('pull', 2, secondLine)
                         end
                     end)
                 end
@@ -1962,9 +1970,9 @@ function handleServerMessageEvent(color, text)
     if wantedConfirmed and pendingWantedTargetId >= 0
         and os.clock() <= pendingWantedExpiresAt
     then
-        sampSendChat(configuredRoleplayLine(
+        sendConfiguredRoleplay(
             pendingWantedRoleplayKey, 1, pendingWantedRoleplayFallback
-        ))
+        )
         pendingWantedTargetId = -1
         pendingWantedTargetNickname = ''
         pendingWantedExpiresAt = 0.0
@@ -2031,7 +2039,7 @@ function handleServerMessageEvent(color, text)
             maskRpUntil = 0.0
             lua_thread.create(function()
                 wait(0)
-                sampSendChat(configuredRoleplayLine('mask', 1, '/me достал маску из кармана и надел её на лицо'))
+                sendConfiguredRoleplay('mask', 1, '/me достал маску из кармана и надел её на лицо')
             end)
         elseif clean == 'У Вас нет с собой маски' then
             maskRpUntil = 0.0
@@ -2043,12 +2051,12 @@ function handleServerMessageEvent(color, text)
             unmaskRpPending = false
             lua_thread.create(function()
                 wait(100)
-                sampSendChat(configuredRoleplayLine('unmask', 1, '/me аккуратно снял маску с лица человека напротив'))
+                sendConfiguredRoleplay('unmask', 1, '/me аккуратно снял маску с лица человека напротив')
             end)
         else
             lua_thread.create(function()
                 wait(100)
-                sampSendChat(configuredRoleplayLine('mask_off', 1, '/me снял маску с лица и убрал её в карман'))
+                sendConfiguredRoleplay('mask_off', 1, '/me снял маску с лица и убрал её в карман')
             end)
         end
     elseif unmaskRpPending then
@@ -2063,7 +2071,7 @@ function handleServerMessageEvent(color, text)
         healmeRpUntil = 0.0
         lua_thread.create(function()
             wait(0)
-            sampSendChat(configuredRoleplayLine('healme', 1, '/me достал аптечку и оказал себе первую помощь'))
+            sendConfiguredRoleplay('healme', 1, '/me достал аптечку и оказал себе первую помощь')
         end)
     end
 
@@ -3014,6 +3022,7 @@ function sampev.onSendChat(message)
 end
 
 local function cancelSequence(silent)
+    roleplayPendingSequences = {}
     sequenceToken = sequenceToken + 1
     if sequenceBusy and not silent then notify('Текущая последовательность остановлена.') end
     sequenceBusy = false
@@ -3046,7 +3055,30 @@ end
 function configuredRoleplayLine(name, index, fallback)
     local body = getRoleplayOverrideBody(name)
     if not body then return fallback end
-    return splitRoleplayBody(body)[index] or fallback
+    local entry = getRoleplayCatalogEntry(name)
+    local slots = entry and #splitRoleplayBody(entry.body) or 1
+    local lines = splitRoleplayBody(body)
+    -- Старые строки остаются этапами действия; хвост относится к последнему этапу.
+    if index < slots then return lines[index] or '' end
+    if index == slots then return table.concat(lines, '\n', index) end
+    return ''
+end
+
+function sendConfiguredRoleplay(name, index, fallback)
+    local lines = splitRoleplayBody(configuredRoleplayLine(name, index, fallback))
+    if #lines == 0 then return end
+    if #lines == 1 and not sequenceBusy and #roleplayPendingSequences == 0
+        and not lines[1]:find('^{wait:') and not lines[1]:match('^/nanim%s') then
+        sampSendChat(lines[1])
+        return
+    end
+    roleplayPendingSequences[#roleplayPendingSequences + 1] = lines
+end
+
+function processRoleplayPendingSequences()
+    if sequenceBusy or #roleplayPendingSequences == 0 then return end
+    local lines = table.remove(roleplayPendingSequences, 1)
+    if isSampAvailable() then runSequence('Дополнительная RP-отыгровка', lines) end
 end
 
 function isEditableRoleplayLine(value)
@@ -3061,19 +3093,16 @@ function applyRoleplayOverrides(sequenceName, lines)
     local key = roleplaySequenceKeys[sequenceName]
     local body = key and getRoleplayOverrideBody(key)
     if not body then return lines end
-    local replacements = splitRoleplayBody(body)
-    local catalogEntry = getRoleplayCatalogEntry(key)
-    local expectedCount = catalogEntry and #splitRoleplayBody(catalogEntry.body) or #replacements
     local editableCount = 0
     for _, line in ipairs(lines or {}) do
         if isEditableRoleplayLine(line) then editableCount = editableCount + 1 end
     end
-    if editableCount ~= expectedCount then return lines end
+    if editableCount == 0 then return lines end
     local result, replacementIndex = {}, 0
     for _, line in ipairs(lines or {}) do
         if isEditableRoleplayLine(line) then
             replacementIndex = replacementIndex + 1
-            result[#result + 1] = replacements[replacementIndex] or line
+            result[#result + 1] = configuredRoleplayLine(key, replacementIndex, line)
         else
             result[#result + 1] = line
         end
@@ -3107,12 +3136,23 @@ function runSequence(name, lines, options)
     end
 
     local prepared = {}
+    local expanded = {}
     for _, raw in ipairs(lines) do
+        if type(raw) == 'string' then
+            for _, part in ipairs(splitRoleplayBody(raw)) do expanded[#expanded + 1] = part end
+        else
+            expanded[#expanded + 1] = raw
+        end
+    end
+    for _, raw in ipairs(expanded) do
         if type(raw) == 'table' and (raw.wait or raw.screenshot) then
             table.insert(prepared, raw)
         else
             local message = replaceTokens(raw, target, options.tokens)
-            if trim(message) ~= '' then
+            local pause = message:match('^{wait:(%d+)}$')
+            if pause then
+                prepared[#prepared + 1] = { wait = math.min(10000, tonumber(pause) or 0) }
+            elseif trim(message) ~= '' then
                 if policeHelperTextSpec(message) then
                     table.insert(prepared, message)
                 else
@@ -3144,6 +3184,9 @@ function runSequence(name, lines, options)
                     wait(20)
                     setVirtualKeyDown(vkeys.VK_F8, false)
                 end
+            elseif item:match('^/nanim%s+%d+%s*$') then
+                commandAnimations(item:match('^/nanim%s+(%d+)'))
+                if index < #prepared then wait(math.max(0, tonumber(delayMs[0]) or 1000)) end
             else
                 local handled, lastSentAt = policeHelperSendConfirmedText(item, token)
                 if not handled then
@@ -11174,8 +11217,9 @@ function updateTrackedWaypoint()
     local scale = 26.666666666667
     -- Используем позицию самой точки, а не вычисляем её через положение ника.
     -- У символа «.» координаты текстдрава указывают начало строки, поэтому учитываем центр глифа.
-    local worldX = ((pointX + 1.5) - mapX) * scale - 3000.0
-    local worldY = 3000.0 - ((pointY + 14.0) - mapY) * scale
+    -- Отступы сверены с журналом измерений; координаты игрока для метки не используются.
+    local worldX = ((pointX + 2.5) - mapX) * scale - 3000.0
+    local worldY = 3000.0 - ((pointY + 15.5) - mapY) * scale
     local moved = not trackedWaypointX
         or getDistanceBetweenCoords2d(trackedWaypointX, trackedWaypointY, worldX, worldY) >= 2.0
     if moved then
@@ -11266,7 +11310,7 @@ end
 local function commandEject(args)
     local id = parseIdOnly(args, '/eject [ID]')
     if not id then return end
-    sampSendChat(configuredRoleplayLine('eject', 1, '/me открыл дверь своего транспорта и помог пассажиру покинуть салон'))
+    sendConfiguredRoleplay('eject', 1, '/me открыл дверь своего транспорта и помог пассажиру покинуть салон')
     sampSendChat('/eject ' .. id)
 end
 
@@ -11779,7 +11823,7 @@ local function commandJailDoor(args)
 end
 
 local function commandBarrierGate(args)
-    sampSendChat(configuredRoleplayLine('open', 1, '/me воспользовался служебным пультом управления шлагбаумом'))
+    sendConfiguredRoleplay('open', 1, '/me воспользовался служебным пультом управления шлагбаумом')
     sampSendChat(serverCommand('open', args))
 end
 
@@ -13296,10 +13340,9 @@ function saveRoleplayEditor()
     local catalogEntry = getRoleplayCatalogEntry(roleplayEditorSelected)
     if not catalogEntry then return end
     local body = trim(fromBuffer(roleplayEditorBodyBuf))
-    local required = #splitRoleplayBody(catalogEntry.body)
     local actual = #splitRoleplayBody(body)
-    if actual ~= required then
-        notify('Для этой команды нужно сохранить строк: ' .. required .. '. Сейчас указано: ' .. actual .. '.')
+    if actual == 0 then
+        notify('Добавьте хотя бы одну строку отыгровки или верните стандарт.')
         return
     end
     for index = #roleplayOverrides, 1, -1 do
@@ -13344,7 +13387,8 @@ function drawRoleplayEditor()
     local selected = getRoleplayCatalogEntry(roleplayEditorSelected)
     if selected then
         imgui.TextColored(imgui.ImVec4(0.42, 0.76, 1.0, 1.0), u8(selected.title))
-        imgui.TextWrapped(u8'Одна строка – одно сообщение. Количество строк изменять нельзя. Доступны штатные подстановки вроде {id}, {name}, {cmd_reason} и {cmd_amount}.')
+        imgui.TextWrapped(u8'Одна строка – одно действие. Можно добавлять и убирать строки, писать /me, /do, команды анимаций и /nanim 1–8. Серверную команду действия повторно вписывать не нужно. Подстановки: {id}, {name}, {cmd_reason}, {cmd_amount}.')
+        imgui.TextWrapped(u8'Пауза: {wait:500} отдельной строкой. Между остальными строками действует задержка из настроек. Дополнительные строки многоэтапной команды выполняются на последнем этапе; ожидание подтверждения сервера сохраняется.')
         imgui.Spacing()
         imgui.SetNextItemWidth(-1)
         imgui.InputTextMultiline(u8('##roleplayBody_' .. selected.name), roleplayEditorBodyBuf,
@@ -13522,6 +13566,7 @@ function drawSettings()
             lastAutoReportAt = -100.0
             saveConfig()
         end
+        imgui.TextDisabled(u8'Включается при обновлении скрипта. Можно выключить до следующего обновления.')
         imgui.TextWrapped(u8'Два убийства одним ID за 6 секунд или три за 15 секунд сразу отправляют один репорт. Между автоматическими репортами выдерживается 15 секунд.')
         if imgui.Checkbox(u8'Автоматически просить проследить найденного игрока', autoReportTracked) then
             trackedReportSent = false
@@ -14555,7 +14600,7 @@ function main()
             putplRpClosePending = false
             putplRpCloseAt = 0.0
             safeRuntimeCall('завершения посадки в транспорт', function()
-                sampSendChat(configuredRoleplayLine('putpl', 3, '/me закрыл дверь патрульного автомобиля'))
+                sendConfiguredRoleplay('putpl', 3, '/me закрыл дверь патрульного автомобиля')
             end)
         end
         if pendingWantedTargetId >= 0 and runtimeNow > pendingWantedExpiresAt then
@@ -14604,6 +14649,7 @@ function main()
             safeRuntimeCall('автоматизации отслеживания', updateTrackedTargetAutomation)
             nextTrackingUpdate = os.clock() + 0.75
         end
+        safeRuntimeCall('очереди RP-отыгровок', processRoleplayPendingSequences)
         if os.clock() >= nextWeaponCheck then
             safeRuntimeCall('RP-отыгровок оружия', updateWeaponRoleplay)
             nextWeaponCheck = os.clock() + 0.1
@@ -14667,9 +14713,7 @@ function main()
                     sharedTrackingOfferId = -1
                     sharedTrackingOfferName = ''
                     sharedTrackingOfferUntil = 0.0
-                    if trackedTargetId == offerId and trackingConfirmed then
-                        notify('Дело №' .. offerId .. ' уже отслеживается. Текущая метка сохранена.')
-                    elseif trackedTargetId >= 0 and trackingConfirmed then
+                    if trackedTargetId >= 0 and trackingConfirmed then
                         sharedTrackingSwitchId = offerId
                         sharedTrackingSwitchName = offerName
                         sharedTrackingSwitchUntil = os.clock() + 15.0
