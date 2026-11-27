@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '28112026_015202'
+LOCAL_VERSION = '28112026_021036'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -696,11 +696,11 @@ interviewState = {
     lastStep = 0
 }
 commandEditorNameBuf = newBuffer(32, '')
-commandEditorBodyBuf = newBuffer(2048, '')
-aliasSearchBuf = newBuffer(64, '')
-aliasInputBuffers = {}
+commandEditorBodyBuf = newBuffer(16384, '')
 commandRenameBuffers = {}
-builtInEditorMode = 1
+unifiedCommandTarget = ''
+unifiedVariantName = ''
+unifiedCommandSearchBuf = newBuffer(96, '')
 registeredHelperCommands = {}
 commandRenames = {}
 commandEditorIndex = 0
@@ -712,7 +712,6 @@ editorReservedCommands = {}
 actionHotkeys = {}
 commandsSettingsPage = 1
 roleplayOverrides = {}
-roleplayEditorSearchBuf = newBuffer(96, '')
 roleplayEditorBodyBuf = newBuffer(16384, '')
 roleplayEditorSelected = ''
 local ticketAmount = new.int(15000)
@@ -970,6 +969,16 @@ roleplayPendingSequences = {}
 actionHotkeys = parseActionHotkeys(config.main.actionHotkeys)
 
 roleplayCatalog = {
+    { name = 'setmark', title = '/setmark, /sm, /wanted – получение координат', body = '/me вносит данные в бортовой компьютер, получает результат на дисплей.\n/do На дисплее данные и координаты дела №{id} - {name}.' },
+    { name = 'sos', title = '/sos – тревожная кнопка', body = '/me нажал тревожную кнопку на нагрудной радиостанции' },
+    { name = 'udo', title = '/udo – показать удостоверение', body = 'Здравствуйте. {myname}, {rank}, {department}.\n/me снял служебное удостоверение с нагрудного крепления и показал его человеку напротив.\n/do В удостоверении указано: {myname} | {rank} | {department}.\n/me вернул удостоверение на нагрудное крепление.' },
+    { name = 'prava', title = '/prava – права задержанного', body = 'Вы имеете право хранить молчание.\nВсё сказанное вами может быть использовано против вас в суде.\nВы имеете право на адвоката и один телефонный звонок.\nЕсли вы не можете оплатить услуги адвоката, он будет предоставлен государством.\nВам понятны ваши права?' },
+    { name = 'bodycam_on', title = 'Включение боди-камеры', body = '/me включил боди-камеру на груди' },
+    { name = 'bodycam_off', title = 'Выключение боди-камеры', body = '/me выключил боди-камеру на груди и сохранил запись' },
+    { name = 'phone_accept', title = 'Ответ на звонок', body = '/me достал телефон и принял входящий вызов' },
+    { name = 'phone_decline', title = 'Отклонение звонка', body = '/me достал телефон, отклонил входящий вызов и убрал устройство обратно' },
+    { name = 'skin_self', title = 'Получение формы для себя', body = '/do В руках заранее подготовленный комплект с формой.\n/me взял пакет с формой для себя' },
+    { name = 'skin_other', title = 'Выдача формы сотруднику', body = '/do В руках заранее подготовленный комплект с формой.\n/me выдал пакет с формой для {name}' },
     { name = 'cuff', title = '/cuff, /cf – надеть наручники', body = '/me снял наручники с поясного держателя и раскрыл фиксирующий механизм\n/me зафиксировал наручники на запястьях задержанного' },
     { name = 'uncuff', title = '/uncuff – снять наручники', body = '/me достал ключ и открыл фиксирующий механизм наручников.\n/me снял наручники с рук задержанного и закрепил их на поясе' },
     { name = 'hold', title = '/hold, /hd – сопровождать', body = '/me аккуратно взял задержанного под руку и повёл за собой' },
@@ -1017,6 +1026,10 @@ roleplayCatalog = {
 }
 
 roleplaySequenceKeys = {
+    ['Тревожная кнопка'] = 'sos',
+    ['Показ удостоверения'] = 'udo', ['Права задержанного'] = 'prava',
+    ['Боди-камера включена'] = 'bodycam_on', ['Боди-камера выключена'] = 'bodycam_off',
+    ['Выдача формы себе'] = 'skin_self', ['Выдача формы сотруднику'] = 'skin_other',
     ['Наручники'] = 'cuff', ['Снятие наручников'] = 'uncuff', ['Сопровождение'] = 'hold',
     ['Посадка в автомобиль'] = 'putpl', ['Высадка из транспорта'] = 'pull', ['Обыск'] = 'search',
     ['Арест'] = 'arrest', ['Снятие розыска'] = 'clear', ['Выдача розыска'] = 'su',
@@ -1944,11 +1957,21 @@ function handleServerMessageEvent(color, text)
         lua_thread.create(function()
             wait(150)
             if isSampAvailable() and trackedTargetId == detectedId and trackingConfirmed then
-                sendRawRpCommand('/me вносит данные в бортовой компьютер, получает результат на дисплей.')
+                local firstLine = '/me вносит данные в бортовой компьютер, получает результат на дисплей.'
+                if getRoleplayOverrideBody('setmark') then
+                    sendConfiguredRoleplay('setmark', 1, firstLine, { detectedId, (trim(detectedName):gsub('_', ' ')) })
+                else
+                    sendRawRpCommand(firstLine)
+                end
                 wait(math.max(0, delayMs[0]))
                 if trackedTargetId == detectedId and trackingConfirmed then
                     local displayName = trim(detectedName):gsub('_', ' ')
-                    sampSendChat('/do На дисплее данные и координаты дела №' .. detectedId .. ' - ' .. displayName .. '.')
+                    local displayLine = '/do На дисплее данные и координаты дела №' .. detectedId .. ' - ' .. displayName .. '.'
+                    if getRoleplayOverrideBody('setmark') then
+                        sendConfiguredRoleplay('setmark', 2, displayLine, { detectedId, displayName })
+                    else
+                        sampSendChat(displayLine)
+                    end
                 end
             end
         end)
@@ -3098,8 +3121,10 @@ function configuredRoleplayLine(name, index, fallback)
     return ''
 end
 
-function sendConfiguredRoleplay(name, index, fallback)
-    local lines = splitRoleplayBody(configuredRoleplayLine(name, index, fallback))
+function sendConfiguredRoleplay(name, index, fallback, target)
+    local body = configuredRoleplayLine(name, index, fallback)
+    if target then body = replaceTokens(body, target) end
+    local lines = splitRoleplayBody(body)
     if #lines == 0 then return end
     if #lines == 1 and not sequenceBusy and #roleplayPendingSequences == 0
         and not lines[1]:find('^{wait:') and not lines[1]:match('^/nanim%s') then
@@ -11506,13 +11531,14 @@ local function runChangeSkinRoleplay(validId, nickname)
     local action = selfOk and validId == selfId
         and '/me взял пакет с формой для себя'
         or '/me выдал пакет с формой для ' .. nickname
-    runSequence('Выдача комплекта формы', {
+    local sequenceTitle = selfOk and validId == selfId and 'Выдача формы себе' or 'Выдача формы сотруднику'
+    runSequence(sequenceTitle, {
         '/do В руках заранее подготовленный комплект с формой.',
         { wait = 777 },
         action,
         { wait = 444 },
         serverCommand('changeskin', validId)
-    })
+    }, { targetId = validId })
 end
 
 function commandChangeSkin(args)
@@ -11599,14 +11625,22 @@ function commandFollowOff()
 end
 
 function commandPhoneAccept()
-    sampSendChat('/me достал телефон и принял входящий вызов')
+    if getRoleplayOverrideBody('phone_accept') then
+        sendConfiguredRoleplay('phone_accept', 1, '/me достал телефон и принял входящий вызов')
+    else
+        sampSendChat('/me достал телефон и принял входящий вызов')
+    end
     sampSendChat('/p')
     addLog('Ответ на звонок')
     incomingCallUntil = 0.0
 end
 
 function commandPhoneDecline()
-    sampSendChat('/me достал телефон, отклонил входящий вызов и убрал устройство обратно')
+    if getRoleplayOverrideBody('phone_decline') then
+        sendConfiguredRoleplay('phone_decline', 1, '/me достал телефон, отклонил входящий вызов и убрал устройство обратно')
+    else
+        sampSendChat('/me достал телефон, отклонил входящий вызов и убрал устройство обратно')
+    end
     sampSendChat('/h')
     addLog('Отклонение звонка')
     incomingCallUntil = 0.0
@@ -12580,6 +12614,79 @@ function normalizeEditorCommand(value)
     return trim(value):gsub('^/+', ''):lower()
 end
 
+-- Общая карточка команды связывает имя, штатные RP-варианты и дополнительный текст.
+function getUnifiedCommandVariants(target)
+    local links = {
+        cf = 'cuff', hd = 'hold', se = 'search', pl = 'putpl',
+        sus = 'su', pg = 'su', vn = 'su', tick = 'ticket', vstr = 'ticket',
+        uninviteoff = 'uninvite', offrang = 'rang', fo = 'follow', foff = 'follow',
+        sm = 'setmark', wanted = 'setmark', wd = 'setmark', sosoff = 'clear',
+        form = { 'form_on', 'form_off' }, d = { 'door_open', 'door_close' },
+        mask = { 'mask', 'mask_off' }, bc = { 'bodycam_on', 'bodycam_off' },
+        pp = 'phone_accept', hh = 'phone_decline',
+        cs = { 'skin_self', 'skin_other' }, changeskin = { 'skin_self', 'skin_other' }
+    }
+    local key = links[target] or target
+    local choices = type(key) == 'table' and key or { key }
+    local result = {}
+    for _, name in ipairs(choices) do
+        local entry = getRoleplayCatalogEntry(name)
+        if entry then result[#result + 1] = entry end
+    end
+    if #result == 0 then
+        result[1] = { name = 'extra_' .. target, title = 'Дополнительный текст после команды', body = '', extra = true }
+    end
+    return result
+end
+
+function getUnifiedCommandRows()
+    local rows, seen = {}, {}
+    for _, group in ipairs(editorCommandGroups) do
+        for _, item in ipairs(group.items) do
+            if editorBuiltInHandlers[item[1]] and not seen[item[1]] then
+                seen[item[1]] = true
+                rows[#rows + 1] = { target = item[1], arguments = item[2], description = item[3], group = group.title }
+            end
+        end
+    end
+    return rows
+end
+
+function findUnifiedCommandRow(target)
+    for _, row in ipairs(getUnifiedCommandRows()) do if row.target == target then return row end end
+end
+
+function makeBuiltInCommandHandler(target)
+    return function(args) return executeBuiltInCommand(target, args or '') end
+end
+
+function executeBuiltInCommand(target, args)
+    local handler = editorBuiltInHandlers[target]
+    if not handler then return end
+    local result = handler(args)
+    local variant = getUnifiedCommandVariants(target)[1]
+    local body = variant.extra and getRoleplayOverrideBody(variant.name)
+    if result == false or not body or trim(body) == '' then return result end
+    -- Дополнительные строки не заменяют серверное действие и не означают его подтверждение.
+    local row = findUnifiedCommandRow(target)
+    local arguments = {}
+    for value in trim(args):gmatch('%S+') do arguments[#arguments + 1] = value end
+    if row and row.arguments:match('^ID') then
+        local id = tonumber(arguments[1])
+        if not id or not sampIsPlayerConnected(id) then return result end
+    end
+    local player, tokens = buildCustomCommandContext(arguments)
+    local lines = {}
+    for _, line in ipairs(splitRoleplayBody(body)) do
+        line = line:gsub('{args}', function() return args end)
+            :gsub('{arg}', function() return args end)
+            :gsub('{(%d+)}', function(index) return arguments[tonumber(index)] or '' end)
+        lines[#lines + 1] = replaceTokens(line, player, tokens)
+    end
+    if #lines > 0 then roleplayPendingSequences[#roleplayPendingSequences + 1] = lines end
+    return result
+end
+
 -- Имена хелпера отделены от серверных команд и внутренних обработчиков.
 function getBuiltInCommandName(target)
     for _, entry in ipairs(commandRenames) do
@@ -12660,7 +12767,7 @@ function saveBuiltInCommandName(target, reset)
     if previous == name then
         setBuffer(buffer, ffi.sizeof(buffer), name)
         notify('Имя команды не изменилось.')
-        return
+        return true
     end
     if type(sampUnregisterChatCommand) ~= 'function' then
         notify('В установленной версии SAMPFUNCS недоступна безопасная смена имени команды.')
@@ -12669,7 +12776,7 @@ function saveBuiltInCommandName(target, reset)
     local conflict = commandNameConflict(name, target)
     if conflict then notify(conflict); return end
     -- Сначала резервируем новое имя. При ошибке прежняя команда остаётся рабочей.
-    if not registerSafeCommand(name, handler) then notify('Не удалось зарегистрировать новое имя.'); return end
+    if not registerSafeCommand(name, makeBuiltInCommandHandler(target)) then notify('Не удалось зарегистрировать новое имя.'); return end
     if not unregisterHelperCommand(previous) then
         unregisterHelperCommand(name)
         notify('Не удалось освободить прежнее имя. Переименование отменено.')
@@ -12679,6 +12786,7 @@ function saveBuiltInCommandName(target, reset)
     setBuffer(buffer, ffi.sizeof(buffer), name)
     saveConfig()
     notify('Команда хелпера /' .. previous .. ' переименована в /' .. name .. '. Аргументы и действие сохранены.')
+    return true
 end
 
 function registerBuiltInCommands()
@@ -12703,9 +12811,9 @@ function registerBuiltInCommands()
     for _, target in ipairs(names) do
         local name = getBuiltInCommandName(target)
         local invalid = #name > 31 or not name:match('^[a-z0-9_]+$')
-        if invalid or commandNameConflict(name, target) or not registerSafeCommand(name, editorBuiltInHandlers[target]) then
+        if invalid or commandNameConflict(name, target) or not registerSafeCommand(name, makeBuiltInCommandHandler(target)) then
             setBuiltInCommandName(target, target)
-            if registerSafeCommand(target, editorBuiltInHandlers[target]) then
+            if registerSafeCommand(target, makeBuiltInCommandHandler(target)) then
                 notify('Для /' .. target .. ' восстановлено стандартное имя: выбранное имя недоступно.')
             else
                 notify('Команда /' .. target .. ' не зарегистрирована: имя занято другим скриптом.')
@@ -12982,7 +13090,7 @@ function executeEditorCommand(name, args)
     if kind == 'alias' then
         local handler = editorBuiltInHandlers[normalizeEditorCommand(entry.target)]
         if not handler then notify('Исходная команда /' .. tostring(entry.target) .. ' недоступна.'); return end
-        local ok, err = pcall(handler, args or '')
+        local ok, err = pcall(executeBuiltInCommand, normalizeEditorCommand(entry.target), args or '')
         if not ok then
             notify('Не удалось выполнить пользовательский алиас.')
             print('[PoliceHelper] Ошибка алиаса /' .. name .. ': ' .. tostring(err))
@@ -13018,12 +13126,14 @@ end
 
 function registerEditorCommandName(name)
     name = normalizeEditorCommand(name)
-    if name == '' or editorReservedCommands[name] or editorRegisteredCommands[name] then return end
+    if name == '' or editorReservedCommands[name] then return false end
+    if editorRegisteredCommands[name] then return true end
     local ok = registerSafeCommand(name, function(args)
         return safeCommandCall(name, function(value) return executeEditorCommand(name, value) end, args)
     end)
     if ok then editorRegisteredCommands[name] = true
     else print('[PoliceHelper] Не удалось зарегистрировать /' .. name .. ': имя недоступно.') end
+    return ok
 end
 
 function registerAllEditorCommands()
@@ -13182,69 +13292,26 @@ editorCommandGroups = {
     }}
 }
 
-function getAliasForTarget(target)
-    for _, entry in ipairs(commandAliases) do
-        if normalizeEditorCommand(entry.target) == target then return entry.name end
-    end
-    return ''
-end
 
 
-function getAliasInputBuffer(target)
-    if not aliasInputBuffers[target] then aliasInputBuffers[target] = newBuffer(32, getAliasForTarget(target)) end
-    return aliasInputBuffers[target]
-end
 
-function initializeAliasInputBuffers()
-    for _, group in ipairs(editorCommandGroups) do
-        for _, item in ipairs(group.items) do getAliasInputBuffer(item[1]) end
-    end
-end
-initializeAliasInputBuffers()
 
-function saveAliasForTarget(target)
-    local buffer = getAliasInputBuffer(target)
-    local name = normalizeEditorCommand(fromBuffer(buffer))
-    if name ~= '' and not name:match('^[%w_]+$') then
-        notify('Имя команды: только латинские буквы, цифры и нижнее подчёркивание.')
-        return
-    end
-    if name ~= '' then
-        for _, entry in ipairs(commandRenames) do
-            if entry.name == name then notify('Имя уже назначено встроенной команде.'); return end
-        end
-        if editorReservedCommands[name] then notify('Команда /' .. name .. ' уже существует.'); return end
-        for _, entry in ipairs(commandAliases) do
-            if entry.name == name and normalizeEditorCommand(entry.target) ~= target then
-                notify('Алиас /' .. name .. ' уже используется.'); return
-            end
-        end
-        for _, entry in ipairs(customCommands) do
-            if entry.name == name then notify('Команда /' .. name .. ' уже существует.'); return end
-        end
-    end
-    for index = #commandAliases, 1, -1 do
-        if normalizeEditorCommand(commandAliases[index].target) == target then table.remove(commandAliases, index) end
-    end
-    if name ~= '' then
-        commandAliases[#commandAliases + 1] = { name = name, target = target }
-        registerEditorCommandName(name)
-        notify('Алиас /' .. name .. ' вызывает /' .. target .. ' с теми же аргументами.')
-    else
-        notify('Дополнительное имя для /' .. target .. ' удалено.')
-    end
-    saveConfig()
-end
 
 function saveCustomCommandForm()
     local name = normalizeEditorCommand(fromBuffer(commandEditorNameBuf))
     local body = trim(fromBuffer(commandEditorBodyBuf))
-    if not name:match('^[%w_]+$') then notify('Введите имя команды без / латинскими буквами.'); return end
+    if #name > 31 or not name:match('^[a-z0-9_]+$') then notify('Введите до 31 символа: латинские буквы, цифры или нижнее подчёркивание.'); return end
     if body == '' then notify('Введите текст, который должна выполнять команда.'); return end
     if editorNameIsUsed(name, 'custom', commandEditorIndex) then notify('Команда /' .. name .. ' уже существует.'); return end
+    local previous = customCommands[commandEditorIndex]
+    if not registerEditorCommandName(name) then notify('Имя занято или не удалось зарегистрировать команду.'); return end
+    if previous and previous.name ~= name and not unregisterHelperCommand(previous.name) then
+        unregisterHelperCommand(name)
+        notify('Не удалось освободить прежнее имя. Изменения отменены.')
+        return
+    end
     local entry = { name = name, body = body }
     if commandEditorIndex > 0 then customCommands[commandEditorIndex] = entry else customCommands[#customCommands + 1] = entry end
-    registerEditorCommandName(name)
     saveConfig()
     setBuffer(commandEditorNameBuf, ffi.sizeof(commandEditorNameBuf), '')
     setBuffer(commandEditorBodyBuf, ffi.sizeof(commandEditorBodyBuf), '')
@@ -13260,137 +13327,167 @@ function editCustomCommand(index)
     setBuffer(commandEditorBodyBuf, ffi.sizeof(commandEditorBodyBuf), entry.body)
 end
 
-function loadRoleplayEditor(name)
-    local entry = getRoleplayCatalogEntry(name)
-    if not entry then return end
-    roleplayEditorSelected = name
-    setBuffer(roleplayEditorBodyBuf, ffi.sizeof(roleplayEditorBodyBuf), getRoleplayOverrideBody(name) or entry.body)
+
+
+
+
+
+function getUnifiedSelectedVariant()
+    local variants = getUnifiedCommandVariants(unifiedCommandTarget)
+    for _, entry in ipairs(variants) do if entry.name == unifiedVariantName then return entry end end
+    return variants[1]
 end
 
-function saveRoleplayEditor()
-    local catalogEntry = getRoleplayCatalogEntry(roleplayEditorSelected)
-    if not catalogEntry then return end
-    local body = trim(fromBuffer(roleplayEditorBodyBuf))
-    local actual = #splitRoleplayBody(body)
-    if actual == 0 then
-        notify('Добавьте хотя бы одну строку отыгровки или верните стандарт.')
+function unifiedCommandHasChanges()
+    if unifiedCommandTarget == '' then return false end
+    local variant = getUnifiedSelectedVariant()
+    local name = normalizeEditorCommand(fromBuffer(getCommandRenameBuffer(unifiedCommandTarget)))
+    local saved = getRoleplayOverrideBody(variant.name) or variant.body
+    return name ~= getBuiltInCommandName(unifiedCommandTarget)
+        or trim(fromBuffer(roleplayEditorBodyBuf)) ~= trim(saved)
+end
+
+function selectUnifiedCommand(target, variantName, force)
+    if not force and unifiedCommandHasChanges() then
+        notify('Сначала сохраните изменения или нажмите «Отменить изменения».')
+        return false
+    end
+    unifiedCommandTarget = target
+    unifiedVariantName = variantName or getUnifiedCommandVariants(target)[1].name
+    local variant = getUnifiedSelectedVariant()
+    unifiedVariantName = variant.name
+    roleplayEditorSelected = variant.name
+    local buffer = getCommandRenameBuffer(target)
+    setBuffer(buffer, ffi.sizeof(buffer), getBuiltInCommandName(target))
+    setBuffer(roleplayEditorBodyBuf, ffi.sizeof(roleplayEditorBodyBuf), getRoleplayOverrideBody(variant.name) or variant.body)
+    return true
+end
+
+function saveUnifiedCommand(reset)
+    local variant = getUnifiedSelectedVariant()
+    local target = unifiedCommandTarget
+    if not editorBuiltInHandlers[target] then return end
+    local body = reset and variant.body or trim(fromBuffer(roleplayEditorBodyBuf))
+    if not variant.extra and #splitRoleplayBody(body) == 0 then
+        notify('Штатный шаблон не может быть пустым. Верните стандарт или добавьте хотя бы одну строку.')
         return
     end
+    local name = reset and target or normalizeEditorCommand(fromBuffer(getCommandRenameBuffer(target)))
+    if name == '' then name = target end
+    if name ~= getBuiltInCommandName(target) and not saveBuiltInCommandName(target, reset) then return end
     for index = #roleplayOverrides, 1, -1 do
-        if roleplayOverrides[index].name == roleplayEditorSelected then table.remove(roleplayOverrides, index) end
+        if roleplayOverrides[index].name == variant.name then table.remove(roleplayOverrides, index) end
     end
-    roleplayOverrides[#roleplayOverrides + 1] = { name = roleplayEditorSelected, body = body }
+    if not reset and body ~= variant.body and body ~= '' then
+        roleplayOverrides[#roleplayOverrides + 1] = { name = variant.name, body = body }
+    end
     saveConfig()
-    notify('RP-отыгровка сохранена.')
+    selectUnifiedCommand(target, variant.name, true)
+    notify(reset and 'Стандартное имя и выбранный текст восстановлены.' or 'Имя и текст команды сохранены.')
 end
 
-function resetRoleplayEditor()
-    local catalogEntry = getRoleplayCatalogEntry(roleplayEditorSelected)
-    if not catalogEntry then return end
-    for index = #roleplayOverrides, 1, -1 do
-        if roleplayOverrides[index].name == roleplayEditorSelected then table.remove(roleplayOverrides, index) end
-    end
-    setBuffer(roleplayEditorBodyBuf, ffi.sizeof(roleplayEditorBodyBuf), catalogEntry.body)
-    saveConfig()
-    notify('Возвращена стандартная RP-отыгровка.')
-end
-
-function drawRoleplayEditor()
-    if roleplayEditorSelected == '' and roleplayCatalog[1] then loadRoleplayEditor(roleplayCatalog[1].name) end
-    imgui.TextWrapped(u8'Меняются только RP-строки выбранного действия. Серверная команда, её аргументы и порядок выполнения защищены и остаются встроенными.')
-    imgui.Spacing()
-    imgui.SetNextItemWidth(285)
-    imgui.InputTextWithHint(u8'##roleplaySearch', u8'Поиск команды...', roleplayEditorSearchBuf, ffi.sizeof(roleplayEditorSearchBuf))
-    local query = lowerCp1251(trim(fromBuffer(roleplayEditorSearchBuf)))
-
-    imgui.BeginChild('##roleplayCatalog', imgui.ImVec2(305, 0), true)
-    for _, entry in ipairs(roleplayCatalog) do
-        local title = helperCommandSignature(entry.title)
-        if query == '' or lowerCp1251(title .. ' ' .. entry.title):find(query, 1, true) then
-            if imgui.Selectable(u8(title .. '##rp_' .. entry.name), roleplayEditorSelected == entry.name, 0, imgui.ImVec2(0, 30)) then
-                loadRoleplayEditor(entry.name)
+function removeLegacyCommandAliases(target)
+    for index = #commandAliases, 1, -1 do
+        local entry = commandAliases[index]
+        if normalizeEditorCommand(entry.target) == target then
+            if registeredHelperCommands[entry.name] and not unregisterHelperCommand(entry.name) then
+                notify('Не удалось освободить старое имя /' .. entry.name .. '.')
+                return
             end
+            table.remove(commandAliases, index)
         end
     end
-    imgui.EndChild()
-    imgui.SameLine()
-
-    imgui.BeginChild('##roleplayEditBody', imgui.ImVec2(0, 0), true)
-    local selected = getRoleplayCatalogEntry(roleplayEditorSelected)
-    if selected then
-        imgui.TextColored(imgui.ImVec4(0.42, 0.76, 1.0, 1.0), u8(helperCommandSignature(selected.title)))
-        imgui.TextWrapped(u8'Одна строка – одно действие. Можно добавлять и убирать строки, писать /me, /do, команды анимаций и /nanim 1–8. Серверную команду действия повторно вписывать не нужно. Подстановки: {id}, {name}, {cmd_reason}, {cmd_amount}.')
-        imgui.TextWrapped(u8'Пауза: {wait:500} отдельной строкой. Между остальными строками действует задержка из настроек. Дополнительные строки многоэтапной команды выполняются на последнем этапе; ожидание подтверждения сервера сохраняется.')
-        imgui.Spacing()
-        imgui.SetNextItemWidth(-1)
-        imgui.InputTextMultiline(u8('##roleplayBody_' .. selected.name), roleplayEditorBodyBuf,
-            ffi.sizeof(roleplayEditorBodyBuf), imgui.ImVec2(-1, 230))
-        imgui.Spacing()
-        if imgui.Button(u8'Сохранить отыгровку##saveRoleplay', imgui.ImVec2(190, 31)) then saveRoleplayEditor() end
-        imgui.SameLine()
-        if imgui.Button(u8'Вернуть стандарт##resetRoleplay', imgui.ImVec2(170, 31)) then resetRoleplayEditor() end
-    end
-    imgui.EndChild()
+    saveConfig()
+    notify('Ранее сохранённые дополнительные имена удалены. Осталось основное имя команды.')
 end
 
-function drawBuiltInCommandNamesEditor()
-    section('Встроенные команды')
-    builtInEditorMode = drawCenteredTabs({ 'Переименование', 'Дополнительные имена' }, builtInEditorMode, 'builtInNames', 205)
-    if builtInEditorMode == 1 then
-        imgui.TextWrapped(u8'Новое имя заменяет команду хелпера, а не создаёт алиас. Например: /sus меняется на /rozysk. Аргументы и RP сохраняются. Серверная команда не переименовывается: освобождённое старое имя может продолжить работать напрямую на сервере без обработки хелпера.')
-    else
-        imgui.TextWrapped(u8'Алиас – дополнительное имя того же действия. Основное имя продолжает работать. Все аргументы передаются автоматически.')
+function drawUnifiedBuiltInEditor()
+    local rows = getUnifiedCommandRows()
+    if #rows == 0 then imgui.TextWrapped(u8'Команды ещё не зарегистрированы.'); return end
+    if not editorBuiltInHandlers[unifiedCommandTarget] then
+        selectUnifiedCommand(editorBuiltInHandlers.cuff and 'cuff' or rows[1].target, nil, true)
     end
-    imgui.SetNextItemWidth(330)
-    imgui.InputTextWithHint(u8'##aliasCommandSearch', u8'Поиск команды или описания...', aliasSearchBuf, ffi.sizeof(aliasSearchBuf))
-    local query = lowerCp1251(trim(fromBuffer(aliasSearchBuf)))
-    imgui.BeginChild('##stableAliasList', imgui.ImVec2(0, 460), true)
-    for groupIndex, group in ipairs(editorCommandGroups) do
-        local visible = {}
-        for _, item in ipairs(group.items) do
-            local combined = '/' .. item[1] .. ' ' .. item[2] .. ' ' .. item[3]
-                .. ' /' .. getBuiltInCommandName(item[1])
-            if query == '' or lowerCp1251(combined):find(query, 1, true) then visible[#visible + 1] = item end
-        end
-        if #visible > 0 then
-            imgui.SetNextItemOpen(true, imgui.Cond.Once)
-            if imgui.CollapsingHeader(u8(group.title .. '##aliasGroup' .. groupIndex)) then
-                for _, item in ipairs(visible) do
-                    local target, arguments, description = item[1], item[2], item[3]
-                    local currentName = getBuiltInCommandName(target)
-                    local commandText = '/' .. currentName .. (arguments ~= '' and (' ' .. arguments) or '')
-                    imgui.TextColored(imgui.ImVec4(0.35, 0.85, 0.55, 1.0), u8(commandText))
-                    if currentName ~= target then imgui.TextDisabled(u8('Стандартное имя: /' .. target)) end
-                    policeHelperSafeWrappedText(description)
-                    local aliasBuffer = builtInEditorMode == 1 and getCommandRenameBuffer(target) or getAliasInputBuffer(target)
-                    imgui.AlignTextToFramePadding()
-                    imgui.Text(u8'Новое имя без /')
-                    imgui.SameLine(170)
-                    imgui.SetNextItemWidth(255)
-                    imgui.InputText(u8('##commandName_' .. builtInEditorMode .. '_' .. target), aliasBuffer, ffi.sizeof(aliasBuffer))
-                    imgui.SameLine()
-                    if imgui.Button(u8('Применить##nameApply_' .. target), imgui.ImVec2(105, 25)) then
-                        if builtInEditorMode == 1 then saveBuiltInCommandName(target) else saveAliasForTarget(target) end
-                    end
-                    if builtInEditorMode == 1 then
-                        imgui.SameLine()
-                        if imgui.Button(u8('Стандарт##nameReset_' .. target), imgui.ImVec2(95, 25)) then
-                            saveBuiltInCommandName(target, true)
-                        end
-                    end
-                    imgui.Separator()
+    imgui.TextWrapped(u8'Выберите действие, задайте имя и измените текст в одной карточке. Кнопка сохранения применяет оба поля. Аргументы подставляются автоматически.')
+    imgui.SetNextItemWidth(-1)
+    imgui.InputTextWithHint('##unifiedCommandSearch', u8'Найти команду или действие...', unifiedCommandSearchBuf, ffi.sizeof(unifiedCommandSearchBuf))
+    local query = lowerCp1251(trim(fromBuffer(unifiedCommandSearchBuf)))
+    imgui.SetNextItemWidth(-1)
+    if imgui.BeginCombo(u8'##unifiedCommandSelect', u8('/' .. getBuiltInCommandName(unifiedCommandTarget)), 0) then
+        local groupName = ''
+        for _, row in ipairs(rows) do
+            local combined = row.target .. ' ' .. getBuiltInCommandName(row.target) .. ' ' .. row.description
+            if query == '' or lowerCp1251(combined):find(query, 1, true) then
+                if row.group ~= groupName then
+                    groupName = row.group
+                    imgui.TextDisabled(u8(groupName))
+                end
+                local name = getBuiltInCommandName(row.target)
+                local label = '/' .. name .. (name ~= row.target and ('  [/' .. row.target .. ']') or '')
+                if imgui.Selectable(u8(label .. '##unified_' .. row.target), row.target == unifiedCommandTarget) then
+                    selectUnifiedCommand(row.target)
                 end
             end
         end
+        imgui.EndCombo()
     end
-    imgui.EndChild()
+    local row = findUnifiedCommandRow(unifiedCommandTarget)
+    if row then policeHelperSafeWrappedText(row.description) end
+    imgui.TextDisabled(u8('Стандартное имя: /' .. unifiedCommandTarget .. (row and (' ' .. row.arguments) or '')))
+    imgui.Text(u8'Имя команды без /')
+    local nameBuffer = getCommandRenameBuffer(unifiedCommandTarget)
+    imgui.SetNextItemWidth(-1)
+    imgui.InputText('##unifiedCommandName', nameBuffer, ffi.sizeof(nameBuffer))
+    imgui.TextWrapped(u8'Новое имя заменяет команду PoliceHelper. Реальная серверная команда не переименовывается и продолжает отправляться с прежним именем.')
+
+    local variants = getUnifiedCommandVariants(unifiedCommandTarget)
+    local selected = getUnifiedSelectedVariant()
+    if #variants > 1 then
+        imgui.Text(u8'Вариант действия')
+        imgui.SetNextItemWidth(-1)
+        if imgui.BeginCombo('##unifiedVariant', u8(selected.title), 0) then
+            for _, variant in ipairs(variants) do
+                if imgui.Selectable(u8(variant.title .. '##variant_' .. variant.name), variant.name == selected.name) then
+                    selectUnifiedCommand(unifiedCommandTarget, variant.name)
+                end
+            end
+            imgui.EndCombo()
+        end
+        selected = getUnifiedSelectedVariant()
+    end
+    if selected.extra then
+        imgui.TextWrapped(u8'У этой команды нет отдельного штатного RP-шаблона в редакторе. Можно добавить текст после ручного вызова или оставить поле пустым. Это дополнение к действию, а не замена его динамических сообщений; оно не означает подтверждение сервера.')
+    else
+        imgui.TextWrapped(u8'Штатная отыгровка. Для коротких и связанных команд используется общий шаблон. Этапы и ожидание ответа сервера сохраняются; дополнительные строки относятся к последнему этапу.')
+    end
+    imgui.Text(u8(selected.extra and 'Дополнительный текст (необязательно)' or 'Текст отыгровки'))
+    imgui.SetNextItemWidth(-1)
+    imgui.InputTextMultiline('##unifiedRoleplayBody', roleplayEditorBodyBuf, ffi.sizeof(roleplayEditorBodyBuf), imgui.ImVec2(-1, 220))
+    imgui.TextWrapped(u8'Одна строка – одно действие. Можно /me, /do, команды анимаций, /nanim 1–8 и {wait:500}. Подстановки: {id}, {name}, {myname}, {cmd_reason}, {cmd_amount}; в дополнительном тексте также {args}, {1}, {2}. Серверную команду повторно вписывать не нужно.')
+    local available = imgui.GetContentRegionAvail().x
+    local buttonWidth = math.min(220, available)
+    if imgui.Button(u8'Сохранить имя и текст##unifiedSave', imgui.ImVec2(buttonWidth, 32)) then saveUnifiedCommand(false) end
+    if available >= buttonWidth + 165 + imgui.GetStyle().ItemSpacing.x then imgui.SameLine() end
+    if imgui.Button(u8'Вернуть стандарт##unifiedReset', imgui.ImVec2(math.min(165, available), 32)) then saveUnifiedCommand(true) end
+    if unifiedCommandHasChanges() then
+        imgui.TextWrapped(u8'Есть несохранённые изменения. Сохраните их перед выбором другой команды или варианта.')
+        if imgui.Button(u8'Отменить изменения##unifiedCancel') then
+            selectUnifiedCommand(unifiedCommandTarget, unifiedVariantName, true)
+        end
+    end
+    local legacy = {}
+    for _, alias in ipairs(commandAliases) do
+        if normalizeEditorCommand(alias.target) == unifiedCommandTarget then legacy[#legacy + 1] = '/' .. alias.name end
+    end
+    if #legacy > 0 then
+        imgui.Separator()
+        policeHelperSafeWrappedText('Ранее сохранённые имена пока работают для совместимости: ' .. table.concat(legacy, ', '))
+        if imgui.Button(u8'Удалить старые дополнительные имена##legacyClear') then removeLegacyCommandAliases(unifiedCommandTarget) end
+    end
 end
 
-function drawCommandEditor()
-    imgui.SetNextItemOpen(true, imgui.Cond.Once)
+function drawCustomCommandEditor()
+    imgui.SetNextItemOpen(false, imgui.Cond.Once)
     if imgui.CollapsingHeader(u8'Как использовать команды и аргументы##commandArgumentsHelp') then
-        imgui.TextWrapped(u8'Алиас встроенной команды нужен, когда Вы хотите дать готовой команде более удобное имя. Никакие подстановки писать не требуется: весь текст после алиаса автоматически передаётся исходной команде.')
-        imgui.TextColored(imgui.ImVec4(0.45, 0.82, 0.55, 1.0), u8'Пример: для /cuff указан алиас n. Команда /n 15 выполнит /cuff 15 со всей штатной RP-отыгровкой.')
         imgui.BulletText(u8'ID – числовой идентификатор игрока, например 15.')
         imgui.BulletText(u8'Уровень розыска – число от 1 до 6; сумма штрафа – целое число без точек и пробелов.')
         imgui.BulletText(u8'Причина или основание – оставшийся текст после обязательных чисел, например 9.1 УК или встречная полоса.')
@@ -13414,9 +13511,8 @@ function drawCommandEditor()
         imgui.TextDisabled(u8'Если у действия нет изменяемых данных, подстановки не нужны. Просто впишите готовый текст. Между строками применяется задержка из основных настроек.')
     end
 
-    drawBuiltInCommandNamesEditor()
     imgui.Spacing()
-    section('Создать свою команду')
+    section(commandEditorIndex > 0 and 'Изменить свою команду' or 'Создать свою команду')
     imgui.TextWrapped(u8'Введите команду без символа / и текст, который будет выполняться. Каждая строка отправляется по очереди с установленной задержкой.')
     imgui.AlignTextToFramePadding()
     imgui.Text(u8'Команда без /')
@@ -13425,7 +13521,7 @@ function drawCommandEditor()
     imgui.InputText(u8'##customCommandNameFixed', commandEditorNameBuf, ffi.sizeof(commandEditorNameBuf))
     imgui.Text(u8'Выполняемый текст – по одному сообщению в строке')
     imgui.SetNextItemWidth(-1)
-    imgui.InputTextMultiline(u8'##customCommandBodyFixed', commandEditorBodyBuf, ffi.sizeof(commandEditorBodyBuf), imgui.ImVec2(-1, 92))
+    imgui.InputTextMultiline(u8'##customCommandBodyFixed', commandEditorBodyBuf, ffi.sizeof(commandEditorBodyBuf), imgui.ImVec2(-1, 200))
     imgui.TextDisabled(u8'Подстановки перечислены в раскрывающейся справке выше. Паузы разрешены от 0 до 10000 мс.')
     local saveCaption = commandEditorIndex > 0 and 'Сохранить изменения' or '+ Добавить команду'
     if imgui.Button(u8(saveCaption .. '##saveCustomFixed'), imgui.ImVec2(205, 29)) then saveCustomCommandForm() end
@@ -13443,7 +13539,14 @@ function drawCommandEditor()
         if imgui.SmallButton(u8('Изменить##customFixedEdit' .. index)) then editCustomCommand(index) end
         imgui.SameLine()
         if imgui.SmallButton(u8('Удалить##customFixedDelete' .. index)) then
-            table.remove(customCommands, index); commandEditorIndex = 0; saveConfig(); break
+            if unregisterHelperCommand(entry.name) then
+                table.remove(customCommands, index)
+                commandEditorIndex = 0
+                saveConfig()
+            else
+                notify('Не удалось освободить имя команды. Удаление отменено.')
+            end
+            break
         end
     end
 
@@ -13621,14 +13724,14 @@ function drawSettings()
         imgui.Text(u8('Текущая версия: ' .. LOCAL_VERSION))
         if wideButton('Проверить обновление', 240) then updateState.manualCheckRequested = true end
     else
-        local commandTabs = { 'Горячие действия', 'Редактор команд', 'RP-отыгровки' }
+        local commandTabs = { 'Встроенные команды', 'Свои команды', 'Горячие действия' }
         commandsSettingsPage = drawCenteredTabs(commandTabs, commandsSettingsPage, 'commandSettingsTab', 190)
         if commandsSettingsPage == 1 then
-            drawActionHotkeys()
+            drawUnifiedBuiltInEditor()
         elseif commandsSettingsPage == 2 then
-            drawCommandEditor()
+            drawCustomCommandEditor()
         else
-            drawRoleplayEditor()
+            drawActionHotkeys()
         end
     end
     imgui.EndChild()
