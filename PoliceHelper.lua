@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '09112026_234943'
+LOCAL_VERSION = '28112026_012024'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -520,6 +520,7 @@ local defaults = {
         equipmentKnown = 'Щит|Дубинка|Пистолет с глушителем 9 мм|Бронежилет|Маска|Desert Eagle|MP5|M4|Дробовик|Дымовые шашки',
         equipmentSelected = 'Дубинка|Бронежилет|Маска|Desert Eagle|MP5|M4',
         whiteMaskedChatIds = true,
+        splitLongMessages = true,
         whiteNametagIds = false,
         hideVChannel = false,
         hideJobChannels = false,
@@ -618,6 +619,7 @@ autoRadioReports = new.bool(config.main.autoRadioReports == true)
 autoEquipment = new.bool(config.main.autoEquipment == true)
 weaponRoleplay = new.bool(config.main.weaponRoleplay == true)
 whiteMaskedChatIds = new.bool(config.main.whiteMaskedChatIds == true)
+splitLongMessages = new.bool(config.main.splitLongMessages ~= false)
 whiteNametagIds = new.bool(config.main.whiteNametagIds == true)
 hideVChannel = new.bool(config.main.hideVChannel == true)
 hideJobChannels = new.bool(config.main.hideJobChannels == true)
@@ -1222,6 +1224,7 @@ local function saveConfig()
     config.main.equipmentKnown = table.concat(equipmentKnown, '|')
     config.main.equipmentSelected = selectedEquipmentString()
     config.main.whiteMaskedChatIds = whiteMaskedChatIds[0]
+    config.main.splitLongMessages = splitLongMessages[0]
     config.main.whiteNametagIds = whiteNametagIds[0]
     config.main.hideVChannel = hideVChannel[0]
     config.main.hideJobChannels = hideJobChannels[0]
@@ -1249,7 +1252,7 @@ local function saveConfig()
     local file = io.open(CONFIG_PATH, 'wb')
     if not file then return false end
     file:write('[main]\r\n')
-    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoMaskRenew', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportDamagerRelease', 'autoReportTracked', 'autoRadioReports', 'commandAliases', 'customCommands', 'roleplayOverrides', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'whiteMaskedChatIds', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'hideFamilyChat', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
+    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoMaskRenew', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportDamagerRelease', 'autoReportTracked', 'autoRadioReports', 'commandAliases', 'customCommands', 'roleplayOverrides', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'whiteMaskedChatIds', 'splitLongMessages', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'hideFamilyChat', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
         local value = tostring(config.main[key]):gsub('[\r\n]', '')
         file:write(key .. '=' .. value .. '\r\n')
     end
@@ -2676,6 +2679,7 @@ local splitCommands = {
 
 local function prepareMessageParts(message)
     message = normalizeRpMessage(message)
+    if not splitLongMessages[0] then return { message } end
     local command, body = message:match('^/(%a+)%s+(.+)$')
     local limit
     if command == 'me' or command == 'do' then
@@ -2710,6 +2714,7 @@ end
 
 function prepareSequenceMessageParts(message)
     if tostring(message):sub(1, 1) == '/' then return prepareMessageParts(message) end
+    if not splitLongMessages[0] then return { tostring(message) } end
     -- Ограничиваем только речь из биндов. Ручной обычный чат не перехватываем.
     -- Не ждём серверного подтверждения, поэтому задержка остаётся заданной в настройках.
     local body = trim(tostring(message))
@@ -2740,6 +2745,7 @@ policeHelperTextAck = nil
 policeHelperTextSendBusy = false
 
 function policeHelperTextSpec(message)
+    if not splitLongMessages[0] then return nil end
     local command, body = tostring(message or ''):match('^/(%a+)%s+(.+)$')
     if not command then return nil end
     command = command:lower()
@@ -2878,8 +2884,10 @@ function policeHelperSendConfirmedText(message, token)
     local queuedAt = policeHelperTextMilliseconds()
     while policeHelperTextSendBusy and policeHelperTextElapsed(queuedAt) < 15000 do
         if token and token ~= sequenceToken then return true end
+        if not splitLongMessages[0] then return false end
         wait(25)
     end
+    if not splitLongMessages[0] then return false end
     if policeHelperTextSendBusy then
         notify('Продолжение текста отменено: очередь сообщений занята.')
         return true
@@ -2893,6 +2901,7 @@ function policeHelperSendConfirmedText(message, token)
     local lastSentAt
     while remaining ~= '' and index <= 128 do
         if token and token ~= sequenceToken then break end
+        if not splitLongMessages[0] then break end
         local lead = index > 1 and '...' or ''
         local budget = spec.limit - #lead - #(spec.opening or '') - #(spec.closing or '')
         local piece = splitLongText(remaining, budget)[1]
@@ -2917,6 +2926,7 @@ function policeHelperSendConfirmedText(message, token)
         local nextBufferPoll = 100
         while not state.received and not state.failed and policeHelperTextElapsed(lastSentAt) < 5000 do
             if token and token ~= sequenceToken then break end
+            if not splitLongMessages[0] then break end
             wait(25)
             local elapsed = policeHelperTextElapsed(lastSentAt)
             if elapsed >= nextBufferPoll then
@@ -2925,6 +2935,7 @@ function policeHelperSendConfirmedText(message, token)
             end
         end
         policeHelperTextAck = nil
+        if not splitLongMessages[0] then break end
         if not state.received then
             if #remaining > #piece and not state.failed and (not token or token == sequenceToken) then
                 notify('Сервер не подтвердил текст. Продолжение остановлено, чтобы избежать повторов.')
@@ -2970,6 +2981,7 @@ end
 local function sendPreparedParts(parts)
     lua_thread.create(function()
         for index, part in ipairs(parts) do
+            if index > 1 and not splitLongMessages[0] then break end
             outgoingSplitGuard = part
             sampSendChat(part)
             if index < #parts then wait(math.max(0, delayMs[0])) end
@@ -3004,6 +3016,7 @@ end
 function handleSendChatEvent(message)
     if consumeOutgoingSplitGuard(message) then return end
     if type(message) ~= 'string' or message == '' then return end
+    local original = message
     message = addManualRadioTag(message)
     if policeHelperTextSpec(message) then
         policeHelperQueueConfirmedText(message)
@@ -3013,6 +3026,8 @@ function handleSendChatEvent(message)
     if #parts > 1 then
         sendPreparedParts(parts)
         return false
+    elseif parts[1] ~= original then
+        return { parts[1] }
     end
 end
 
@@ -13324,6 +13339,11 @@ function drawSettings()
         section('Чат')
         if imgui.Checkbox(u8'Делать ID игроков белым в чате', whiteMaskedChatIds) then saveConfig() end
         if imgui.Checkbox(u8'Делать ID над персонажами белым (экспериментально)', whiteNametagIds) then saveConfig() end
+
+        section('Длинные сообщения')
+        if imgui.Checkbox(u8'Автоматически переносить длинные сообщения', splitLongMessages) then saveConfig() end
+        imgui.TextWrapped(u8'По умолчанию включено. Длинный текст разбивается на продолжения в том же чате. Действует для RP-отыгровок, рации, мегафона и речи из быстрых действий.')
+        imgui.TextWrapped(u8'Если выключить, каждая исходная строка отправляется одним сообщением без ожидания подтверждения текста. Длинное сообщение может быть обрезано или отклонено сервером. Отдельные строки отыгровки и ожидание результата серверных команд сохраняются.')
 
         section('Скрытие сообщений')
         if imgui.Checkbox(u8'Скрывать объявления /ad и строку проверки СМИ', hideAds) then saveConfig() end
