@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '28112026_013935'
+LOCAL_VERSION = '28112026_015202'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -12589,9 +12589,11 @@ function getBuiltInCommandName(target)
 end
 
 function helperCommandSignature(text)
-    return tostring(text or ''):gsub('/([%w_]+)', function(name)
+    -- gsub возвращает также число замен. Конвертер u8 принимает второй аргумент как кодировку.
+    local signature = tostring(text or ''):gsub('/([%w_]+)', function(name)
         return '/' .. getBuiltInCommandName(name)
     end)
+    return signature
 end
 
 function setBuiltInCommandName(target, name)
