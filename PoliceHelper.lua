@@ -19,7 +19,7 @@ local WINDOW_TITLE = 'PoliceHelper | Created: Ravenhush Ashbluff'
 -- Версия состоит из даты и времени публикации: ДДММГГГГ_ЧЧММСС.
 -- Формат JSON: {"latest":"06092026_035759","updateurl":"https://raw.githubusercontent.com/.../PoliceHelper.lua"}
 UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/yoruhaku/PoliceHelper/main/version.json'
-LOCAL_VERSION = '28112026_012024'
+LOCAL_VERSION = '28112026_013935'
 UPDATE_TIMEOUT_MS = 25000
 
 -- Названия автомобилей лаунчера Advance RP, которых нет в стандартном GTA SA.
@@ -512,6 +512,7 @@ local defaults = {
         autoReportTracked = false,
         autoRadioReports = false,
         commandAliases = '',
+        commandRenames = '',
         customCommands = '',
         actionHotkeys = '',
         actionHotkeyLayoutVersion = 8,
@@ -695,11 +696,13 @@ interviewState = {
     lastStep = 0
 }
 commandEditorNameBuf = newBuffer(32, '')
-commandEditorTargetBuf = newBuffer(32, '')
 commandEditorBodyBuf = newBuffer(2048, '')
 aliasSearchBuf = newBuffer(64, '')
 aliasInputBuffers = {}
-commandEditorMode = ''
+commandRenameBuffers = {}
+builtInEditorMode = 1
+registeredHelperCommands = {}
+commandRenames = {}
 commandEditorIndex = 0
 commandAliases = {}
 customCommands = {}
@@ -960,6 +963,7 @@ function applyRecommendedActionHotkeys()
 end
 
 commandAliases = parseEditorEntries(config.main.commandAliases, 'target')
+commandRenames = parseEditorEntries(config.main.commandRenames, 'target')
 customCommands = parseEditorEntries(config.main.customCommands, 'body')
 roleplayOverrides = parseEditorEntries(config.main.roleplayOverrides, 'body')
 roleplayPendingSequences = {}
@@ -1114,10 +1118,24 @@ function safeCommandCall(name, handler, args)
 end
 
 function registerSafeCommand(name, handler)
-    local ok, err = pcall(sampRegisterChatCommand, name, function(args)
+    if registeredHelperCommands[name] then return true end
+    if type(sampIsChatCommandDefined) == 'function' then
+        local checked, exists = pcall(sampIsChatCommandDefined, name)
+        if not checked or exists then return false end
+    end
+    local ok, result = pcall(sampRegisterChatCommand, name, function(args)
         return safeCommandCall(name, handler, args)
     end)
-    if not ok then protectedError('регистрации /' .. name, err) end
+    if ok and result ~= false then
+        if type(sampIsChatCommandDefined) == 'function' then
+            local checked, exists = pcall(sampIsChatCommandDefined, name)
+            if not checked or not exists then return false end
+        end
+        registeredHelperCommands[name] = true
+        return true
+    end
+    if not ok then protectedError('регистрации /' .. name, result) end
+    return false
 end
 
 function safeFrame(scope, callback)
@@ -1216,6 +1234,7 @@ local function saveConfig()
     config.main.autoReportTracked = autoReportTracked[0]
     config.main.autoRadioReports = autoRadioReports[0]
     config.main.commandAliases = serializeEditorEntries(commandAliases, 'target')
+    config.main.commandRenames = serializeEditorEntries(commandRenames, 'target')
     config.main.customCommands = serializeEditorEntries(customCommands, 'body')
     config.main.actionHotkeys = serializeActionHotkeys()
     config.main.actionHotkeyLayoutVersion = 8
@@ -1252,7 +1271,7 @@ local function saveConfig()
     local file = io.open(CONFIG_PATH, 'wb')
     if not file then return false end
     file:write('[main]\r\n')
-    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoMaskRenew', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportDamagerRelease', 'autoReportTracked', 'autoRadioReports', 'commandAliases', 'customCommands', 'roleplayOverrides', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'whiteMaskedChatIds', 'splitLongMessages', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'hideFamilyChat', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
+    for _, key in ipairs({ 'delay', 'delayDefaultVersion', 'department', 'rank', 'profileMode', 'radioTag', 'factionTag', 'vehicle', 'city', 'location', 'crew', 'hideAds', 'resetAfterMask', 'autoMaskRenew', 'autoEat', 'autoFuel', 'autoReportDamager', 'autoReportDamagerRelease', 'autoReportTracked', 'autoRadioReports', 'commandAliases', 'commandRenames', 'customCommands', 'roleplayOverrides', 'actionHotkeys', 'actionHotkeyLayoutVersion', 'autoEquipment', 'weaponRoleplay', 'equipmentKnown', 'equipmentSelected', 'whiteMaskedChatIds', 'splitLongMessages', 'whiteNametagIds', 'hideVChannel', 'hideJobChannels', 'hideGChannel', 'hidePChannel', 'hideGovNews', 'hideFamilyChat', 'strobesEnabled', 'cruiseEnabled', 'strobeKey1', 'strobeKey2', 'strobeUseSecond', 'cruiseKey1', 'cruiseKey2', 'cruiseUseSecond', 'interfaceFontSize', 'quickKey1', 'quickKey2', 'quickUseSecond', 'mainKey1', 'mainKey2', 'mainUseSecond', 'hotkeyLayoutVersion' }) do
         local value = tostring(config.main[key]):gsub('[\r\n]', '')
         file:write(key .. '=' .. value .. '\r\n')
     end
@@ -11135,6 +11154,7 @@ function openCommandInput(command)
     command = trim(tostring(command or ''))
     if command == '' then return end
     if command:sub(1, 1) ~= '/' then command = '/' .. command end
+    command = helperCommandSignature(command)
     sampSetChatInputEnabled(true)
     sampSetChatInputText(command .. ' ')
 end
@@ -11982,18 +12002,24 @@ local function drawDetailedCommandRows(rows, id, showShortcuts)
     imgui.NextColumn()
     for _, row in ipairs(rows) do
         imgui.PushStyleColor(imgui.Col.Text, imgui.ImVec4(0.25, 0.82, 0.48, 1.0))
-        policeHelperSafeWrappedText(row[1])
+        policeHelperSafeWrappedText(showShortcuts and row[1] or helperCommandSignature(row[1]))
         imgui.PopStyleColor()
         imgui.NextColumn()
         if showShortcuts then
             imgui.PushStyleColor(imgui.Col.Text, imgui.ImVec4(0.42, 0.72, 1.0, 1.0))
-            policeHelperSafeWrappedText(row[4] or '–')
+            policeHelperSafeWrappedText(helperCommandSignature(row[4] or '–'))
             imgui.PopStyleColor()
             imgui.NextColumn()
         end
         policeHelperSafeWrappedText(row[2])
+        if showShortcuts then
+            local original = tostring(row[1]):match('^/([%w_]+)')
+            if original and getBuiltInCommandName(original) ~= original then
+                policeHelperSafeWrappedText('Имя в хелпере: /' .. getBuiltInCommandName(original))
+            end
+        end
         imgui.NextColumn()
-        policeHelperSafeWrappedText(row[3])
+        policeHelperSafeWrappedText(showShortcuts and row[3] or helperCommandSignature(row[3]))
         imgui.NextColumn()
     end
     imgui.Columns(1)
@@ -12554,6 +12580,139 @@ function normalizeEditorCommand(value)
     return trim(value):gsub('^/+', ''):lower()
 end
 
+-- Имена хелпера отделены от серверных команд и внутренних обработчиков.
+function getBuiltInCommandName(target)
+    for _, entry in ipairs(commandRenames) do
+        if entry.target == target then return entry.name end
+    end
+    return target
+end
+
+function helperCommandSignature(text)
+    return tostring(text or ''):gsub('/([%w_]+)', function(name)
+        return '/' .. getBuiltInCommandName(name)
+    end)
+end
+
+function setBuiltInCommandName(target, name)
+    for index = #commandRenames, 1, -1 do
+        if commandRenames[index].target == target then table.remove(commandRenames, index) end
+    end
+    if name ~= target then commandRenames[#commandRenames + 1] = { name = name, target = target } end
+end
+
+function commandNameConflict(name, target)
+    if editorReservedCommands[name] and name ~= target then return 'Имя занято встроенной командой.' end
+    for _, channel in ipairs({ 'r', 'rn', 'f', 'fn', 'n', 's', 'j', 'jn', 'm', 'ad', 'p', 'h' }) do
+        if name == channel then return 'Это стандартная команда текстового канала или телефона.' end
+    end
+    for _, entry in ipairs(commandRenames) do
+        if entry.name == name and entry.target ~= target then return 'Имя уже назначено другому действию.' end
+    end
+    for _, entries in ipairs({ commandAliases, customCommands }) do
+        for _, entry in ipairs(entries) do
+            if entry.name == name then return 'Имя занято алиасом или пользовательской командой.' end
+        end
+    end
+    if registeredHelperCommands[name] and name ~= getBuiltInCommandName(target) then
+        return 'Имя занято другой командой хелпера. После её удаления может потребоваться перезапуск.'
+    end
+    if type(sampIsChatCommandDefined) == 'function' and not registeredHelperCommands[name] then
+        local ok, exists = pcall(sampIsChatCommandDefined, name)
+        if not ok then return 'Не удалось проверить доступность имени.' end
+        if exists then return 'Команда уже зарегистрирована другим скриптом.' end
+    end
+end
+
+function unregisterHelperCommand(name)
+    if not registeredHelperCommands[name] or type(sampUnregisterChatCommand) ~= 'function' then return false end
+    local ok, result = pcall(sampUnregisterChatCommand, name)
+    if not ok or result == false then return false end
+    if type(sampIsChatCommandDefined) == 'function' then
+        local checked, exists = pcall(sampIsChatCommandDefined, name)
+        if not checked or exists then return false end
+    end
+    registeredHelperCommands[name] = nil
+    editorRegisteredCommands[name] = nil
+    return true
+end
+
+function getCommandRenameBuffer(target)
+    if not commandRenameBuffers[target] then
+        commandRenameBuffers[target] = newBuffer(32, getBuiltInCommandName(target))
+    end
+    return commandRenameBuffers[target]
+end
+
+function saveBuiltInCommandName(target, reset)
+    local handler = editorBuiltInHandlers[target]
+    if not handler then notify('Действие хелпера недоступно.'); return end
+    local buffer = getCommandRenameBuffer(target)
+    local name = reset and target or normalizeEditorCommand(fromBuffer(buffer))
+    if name == '' then name = target end
+    if #name > 31 or not name:match('^[a-z0-9_]+$') then
+        notify('Введите до 31 символа: латинские буквы, цифры или нижнее подчёркивание.')
+        return
+    end
+    local previous = getBuiltInCommandName(target)
+    if previous == name then
+        setBuffer(buffer, ffi.sizeof(buffer), name)
+        notify('Имя команды не изменилось.')
+        return
+    end
+    if type(sampUnregisterChatCommand) ~= 'function' then
+        notify('В установленной версии SAMPFUNCS недоступна безопасная смена имени команды.')
+        return
+    end
+    local conflict = commandNameConflict(name, target)
+    if conflict then notify(conflict); return end
+    -- Сначала резервируем новое имя. При ошибке прежняя команда остаётся рабочей.
+    if not registerSafeCommand(name, handler) then notify('Не удалось зарегистрировать новое имя.'); return end
+    if not unregisterHelperCommand(previous) then
+        unregisterHelperCommand(name)
+        notify('Не удалось освободить прежнее имя. Переименование отменено.')
+        return
+    end
+    setBuiltInCommandName(target, name)
+    setBuffer(buffer, ffi.sizeof(buffer), name)
+    saveConfig()
+    notify('Команда хелпера /' .. previous .. ' переименована в /' .. name .. '. Аргументы и действие сохранены.')
+end
+
+function registerBuiltInCommands()
+    for index = #commandRenames, 1, -1 do
+        local entry = commandRenames[index]
+        if not editorBuiltInHandlers[entry.target] then table.remove(commandRenames, index) end
+    end
+    local names = {}
+    for name in pairs(editorBuiltInHandlers) do
+        editorReservedCommands[name] = true
+        names[#names + 1] = name
+    end
+    table.sort(names)
+    local listed, missing = {}, {}
+    for _, group in ipairs(editorCommandGroups) do
+        for _, item in ipairs(group.items) do listed[item[1]] = true end
+    end
+    for _, target in ipairs(names) do
+        if not listed[target] then missing[#missing + 1] = { target, '', 'Встроенная команда PoliceHelper' } end
+    end
+    if #missing > 0 then editorCommandGroups[#editorCommandGroups + 1] = { title = 'Прочие команды', items = missing } end
+    for _, target in ipairs(names) do
+        local name = getBuiltInCommandName(target)
+        local invalid = #name > 31 or not name:match('^[a-z0-9_]+$')
+        if invalid or commandNameConflict(name, target) or not registerSafeCommand(name, editorBuiltInHandlers[target]) then
+            setBuiltInCommandName(target, target)
+            if registerSafeCommand(target, editorBuiltInHandlers[target]) then
+                notify('Для /' .. target .. ' восстановлено стандартное имя: выбранное имя недоступно.')
+            else
+                notify('Команда /' .. target .. ' не зарегистрирована: имя занято другим скриптом.')
+            end
+        end
+    end
+    saveConfig()
+end
+
 function findEditorEntry(name)
     name = normalizeEditorCommand(name)
     for _, entry in ipairs(commandAliases) do
@@ -12858,11 +13017,11 @@ end
 function registerEditorCommandName(name)
     name = normalizeEditorCommand(name)
     if name == '' or editorReservedCommands[name] or editorRegisteredCommands[name] then return end
-    local ok, err = pcall(sampRegisterChatCommand, name, function(args)
+    local ok = registerSafeCommand(name, function(args)
         return safeCommandCall(name, function(value) return executeEditorCommand(name, value) end, args)
     end)
     if ok then editorRegisteredCommands[name] = true
-    else print('[PoliceHelper] Не удалось зарегистрировать /' .. name .. ': ' .. tostring(err)) end
+    else print('[PoliceHelper] Не удалось зарегистрировать /' .. name .. ': имя недоступно.') end
 end
 
 function registerAllEditorCommands()
@@ -12870,17 +13029,10 @@ function registerAllEditorCommands()
     for _, entry in ipairs(customCommands) do registerEditorCommandName(entry.name) end
 end
 
-function beginCommandEditor(mode, index)
-    commandEditorMode, commandEditorIndex = mode, index or 0
-    local source = mode == 'alias' and commandAliases[commandEditorIndex]
-        or mode == 'custom' and customCommands[commandEditorIndex]
-    setBuffer(commandEditorNameBuf, ffi.sizeof(commandEditorNameBuf), source and source.name or '')
-    setBuffer(commandEditorTargetBuf, ffi.sizeof(commandEditorTargetBuf), source and source.target or '')
-    setBuffer(commandEditorBodyBuf, ffi.sizeof(commandEditorBodyBuf), source and source.body or '')
-end
 
 function editorNameIsUsed(name, mode, index)
     if editorReservedCommands[name] then return true end
+    for _, entry in ipairs(commandRenames) do if entry.name == name then return true end end
     for entryIndex, entry in ipairs(commandAliases) do
         if entry.name == name and not (mode == 'alias' and entryIndex == index) then return true end
     end
@@ -12890,26 +13042,6 @@ function editorNameIsUsed(name, mode, index)
     return false
 end
 
-function saveCommandEditorEntry()
-    local name = normalizeEditorCommand(fromBuffer(commandEditorNameBuf))
-    if not name:match('^[%w_]+$') then notify('Имя команды: только латинские буквы, цифры и нижнее подчёркивание.'); return end
-    if editorNameIsUsed(name, commandEditorMode, commandEditorIndex) then notify('Команда /' .. name .. ' уже существует.'); return end
-    if commandEditorMode == 'alias' then
-        local target = normalizeEditorCommand(fromBuffer(commandEditorTargetBuf))
-        if not editorBuiltInHandlers[target] then notify('Укажите команду PoliceHelper, например /hold.'); return end
-        local entry = { name = name, target = target }
-        if commandEditorIndex > 0 then commandAliases[commandEditorIndex] = entry else commandAliases[#commandAliases + 1] = entry end
-    elseif commandEditorMode == 'custom' then
-        local body = trim(fromBuffer(commandEditorBodyBuf))
-        if body == '' then notify('Добавьте хотя бы одно действие.'); return end
-        local entry = { name = name, body = body }
-        if commandEditorIndex > 0 then customCommands[commandEditorIndex] = entry else customCommands[#customCommands + 1] = entry end
-    else return end
-    registerEditorCommandName(name)
-    saveConfig()
-    commandEditorMode, commandEditorIndex = '', 0
-    notify('Команда /' .. name .. ' сохранена.')
-end
 
 function drawActionKeyCapture(actionId, slot, binding)
     local targetName = 'action:' .. actionId .. ':' .. slot
@@ -13076,6 +13208,9 @@ function saveAliasForTarget(target)
         return
     end
     if name ~= '' then
+        for _, entry in ipairs(commandRenames) do
+            if entry.name == name then notify('Имя уже назначено встроенной команде.'); return end
+        end
         if editorReservedCommands[name] then notify('Команда /' .. name .. ' уже существует.'); return end
         for _, entry in ipairs(commandAliases) do
             if entry.name == name and normalizeEditorCommand(entry.target) ~= target then
@@ -13168,8 +13303,9 @@ function drawRoleplayEditor()
 
     imgui.BeginChild('##roleplayCatalog', imgui.ImVec2(305, 0), true)
     for _, entry in ipairs(roleplayCatalog) do
-        if query == '' or lowerCp1251(entry.title):find(query, 1, true) then
-            if imgui.Selectable(u8(entry.title .. '##rp_' .. entry.name), roleplayEditorSelected == entry.name, 0, imgui.ImVec2(0, 30)) then
+        local title = helperCommandSignature(entry.title)
+        if query == '' or lowerCp1251(title .. ' ' .. entry.title):find(query, 1, true) then
+            if imgui.Selectable(u8(title .. '##rp_' .. entry.name), roleplayEditorSelected == entry.name, 0, imgui.ImVec2(0, 30)) then
                 loadRoleplayEditor(entry.name)
             end
         end
@@ -13180,7 +13316,7 @@ function drawRoleplayEditor()
     imgui.BeginChild('##roleplayEditBody', imgui.ImVec2(0, 0), true)
     local selected = getRoleplayCatalogEntry(roleplayEditorSelected)
     if selected then
-        imgui.TextColored(imgui.ImVec4(0.42, 0.76, 1.0, 1.0), u8(selected.title))
+        imgui.TextColored(imgui.ImVec4(0.42, 0.76, 1.0, 1.0), u8(helperCommandSignature(selected.title)))
         imgui.TextWrapped(u8'Одна строка – одно действие. Можно добавлять и убирать строки, писать /me, /do, команды анимаций и /nanim 1–8. Серверную команду действия повторно вписывать не нужно. Подстановки: {id}, {name}, {cmd_reason}, {cmd_amount}.')
         imgui.TextWrapped(u8'Пауза: {wait:500} отдельной строкой. Между остальными строками действует задержка из настроек. Дополнительные строки многоэтапной команды выполняются на последнем этапе; ожидание подтверждения сервера сохраняется.')
         imgui.Spacing()
@@ -13191,6 +13327,59 @@ function drawRoleplayEditor()
         if imgui.Button(u8'Сохранить отыгровку##saveRoleplay', imgui.ImVec2(190, 31)) then saveRoleplayEditor() end
         imgui.SameLine()
         if imgui.Button(u8'Вернуть стандарт##resetRoleplay', imgui.ImVec2(170, 31)) then resetRoleplayEditor() end
+    end
+    imgui.EndChild()
+end
+
+function drawBuiltInCommandNamesEditor()
+    section('Встроенные команды')
+    builtInEditorMode = drawCenteredTabs({ 'Переименование', 'Дополнительные имена' }, builtInEditorMode, 'builtInNames', 205)
+    if builtInEditorMode == 1 then
+        imgui.TextWrapped(u8'Новое имя заменяет команду хелпера, а не создаёт алиас. Например: /sus меняется на /rozysk. Аргументы и RP сохраняются. Серверная команда не переименовывается: освобождённое старое имя может продолжить работать напрямую на сервере без обработки хелпера.')
+    else
+        imgui.TextWrapped(u8'Алиас – дополнительное имя того же действия. Основное имя продолжает работать. Все аргументы передаются автоматически.')
+    end
+    imgui.SetNextItemWidth(330)
+    imgui.InputTextWithHint(u8'##aliasCommandSearch', u8'Поиск команды или описания...', aliasSearchBuf, ffi.sizeof(aliasSearchBuf))
+    local query = lowerCp1251(trim(fromBuffer(aliasSearchBuf)))
+    imgui.BeginChild('##stableAliasList', imgui.ImVec2(0, 460), true)
+    for groupIndex, group in ipairs(editorCommandGroups) do
+        local visible = {}
+        for _, item in ipairs(group.items) do
+            local combined = '/' .. item[1] .. ' ' .. item[2] .. ' ' .. item[3]
+                .. ' /' .. getBuiltInCommandName(item[1])
+            if query == '' or lowerCp1251(combined):find(query, 1, true) then visible[#visible + 1] = item end
+        end
+        if #visible > 0 then
+            imgui.SetNextItemOpen(true, imgui.Cond.Once)
+            if imgui.CollapsingHeader(u8(group.title .. '##aliasGroup' .. groupIndex)) then
+                for _, item in ipairs(visible) do
+                    local target, arguments, description = item[1], item[2], item[3]
+                    local currentName = getBuiltInCommandName(target)
+                    local commandText = '/' .. currentName .. (arguments ~= '' and (' ' .. arguments) or '')
+                    imgui.TextColored(imgui.ImVec4(0.35, 0.85, 0.55, 1.0), u8(commandText))
+                    if currentName ~= target then imgui.TextDisabled(u8('Стандартное имя: /' .. target)) end
+                    policeHelperSafeWrappedText(description)
+                    local aliasBuffer = builtInEditorMode == 1 and getCommandRenameBuffer(target) or getAliasInputBuffer(target)
+                    imgui.AlignTextToFramePadding()
+                    imgui.Text(u8'Новое имя без /')
+                    imgui.SameLine(170)
+                    imgui.SetNextItemWidth(255)
+                    imgui.InputText(u8('##commandName_' .. builtInEditorMode .. '_' .. target), aliasBuffer, ffi.sizeof(aliasBuffer))
+                    imgui.SameLine()
+                    if imgui.Button(u8('Применить##nameApply_' .. target), imgui.ImVec2(105, 25)) then
+                        if builtInEditorMode == 1 then saveBuiltInCommandName(target) else saveAliasForTarget(target) end
+                    end
+                    if builtInEditorMode == 1 then
+                        imgui.SameLine()
+                        if imgui.Button(u8('Стандарт##nameReset_' .. target), imgui.ImVec2(95, 25)) then
+                            saveBuiltInCommandName(target, true)
+                        end
+                    end
+                    imgui.Separator()
+                end
+            end
+        end
     end
     imgui.EndChild()
 end
@@ -13223,6 +13412,8 @@ function drawCommandEditor()
         imgui.TextDisabled(u8'Если у действия нет изменяемых данных, подстановки не нужны. Просто впишите готовый текст. Между строками применяется задержка из основных настроек.')
     end
 
+    drawBuiltInCommandNamesEditor()
+    imgui.Spacing()
     section('Создать свою команду')
     imgui.TextWrapped(u8'Введите команду без символа / и текст, который будет выполняться. Каждая строка отправляется по очереди с установленной задержкой.')
     imgui.AlignTextToFramePadding()
@@ -13254,41 +13445,6 @@ function drawCommandEditor()
         end
     end
 
-    section('Дополнительные имена встроенных команд')
-    imgui.TextWrapped(u8'Поле напротив каждой команды создаёт дополнительное имя. Аргументы подставляются автоматически: например, alias для /cuff ID принимает тот же ID.')
-    imgui.SetNextItemWidth(330)
-    imgui.InputTextWithHint(u8'##aliasCommandSearch', u8'Поиск команды или описания...', aliasSearchBuf, ffi.sizeof(aliasSearchBuf))
-    local query = lowerCp1251(trim(fromBuffer(aliasSearchBuf)))
-    imgui.BeginChild('##stableAliasList', imgui.ImVec2(0, 460), true)
-    for groupIndex, group in ipairs(editorCommandGroups) do
-        local visible = {}
-        for _, item in ipairs(group.items) do
-            local combined = '/' .. item[1] .. ' ' .. item[2] .. ' ' .. item[3]
-            if query == '' or lowerCp1251(combined):find(query, 1, true) then visible[#visible + 1] = item end
-        end
-        if #visible > 0 then
-            imgui.SetNextItemOpen(true, imgui.Cond.Once)
-            if imgui.CollapsingHeader(u8(group.title .. '##aliasGroup' .. groupIndex)) then
-                for _, item in ipairs(visible) do
-                    local target, arguments, description = item[1], item[2], item[3]
-                    local commandText = '/' .. target .. (arguments ~= '' and (' ' .. arguments) or '')
-                    imgui.TextColored(imgui.ImVec4(0.35, 0.85, 0.55, 1.0), u8(commandText))
-                    imgui.SameLine(245)
-                    imgui.TextDisabled(u8(description))
-                    local aliasBuffer = getAliasInputBuffer(target)
-                    imgui.AlignTextToFramePadding()
-                    imgui.Text(u8'Новое имя без /')
-                    imgui.SameLine(170)
-                    imgui.SetNextItemWidth(255)
-                    imgui.InputText(u8('##aliasInput_' .. target), aliasBuffer, ffi.sizeof(aliasBuffer))
-                    imgui.SameLine()
-                    if imgui.Button(u8('Применить##aliasApply_' .. target), imgui.ImVec2(105, 25)) then saveAliasForTarget(target) end
-                    imgui.Separator()
-                end
-            end
-        end
-    end
-    imgui.EndChild()
 end
 
 function drawSettings()
@@ -13456,7 +13612,7 @@ function drawSettings()
         drawKeyCapture('Основная клавиша', 'main1', mainKey1)
         if imgui.Checkbox(u8'Использовать две клавиши##mainPair', mainUseSecond) then saveConfig() end
         if mainUseSecond[0] then drawKeyCapture('Вторая клавиша', 'main2', mainKey2) end
-        imgui.TextWrapped(u8('Текущее назначение: ' .. mainHotkeyName() .. '. Команда /ph работает всегда.'))
+        imgui.TextWrapped(u8('Текущее назначение: ' .. mainHotkeyName() .. '. Команда меню: /' .. getBuiltInCommandName('ph') .. '.'))
         imgui.TextDisabled(u8'Нажмите кнопку с названием клавиши, затем нажмите новую клавишу. Esc отменяет выбор.')
 
         section('Обновление')
@@ -13491,7 +13647,7 @@ function drawSidebar()
         if active then imgui.PopStyleColor() end
         imgui.Dummy(imgui.ImVec2(0, 2))
     end
-    local footerLines = { 'Команда: /ph', 'Открытие окна: ' .. mainHotkeyName(),
+    local footerLines = { 'Команда: /' .. getBuiltInCommandName('ph'), 'Открытие окна: ' .. mainHotkeyName(),
         'Быстрое меню: ' .. quickHotkeyName(), 'Меню игрока: ' .. targetRadialHotkeyName() }
     local footerWidth = imgui.GetContentRegionAvail().x
     local footerHeight = 16
@@ -13799,7 +13955,7 @@ function drawTargetRadialMenu(context)
     if imgui.Begin('##policeTargetRadialMenu', nil, flags) then
         local widest = 0
         for _, item in ipairs(targetRadialItems) do
-            for line in item.label:gmatch('[^\n]+') do
+            for line in helperCommandSignature(item.label):gmatch('[^\n]+') do
                 widest = math.max(widest, imgui.CalcTextSize(u8(line)).x)
             end
         end
@@ -13835,7 +13991,7 @@ function drawTargetRadialMenu(context)
                     imgui.ImVec2(cx + math.cos(right) * outerRadius, cy + math.sin(right) * outerRadius),
                     imgui.ImVec2(cx + math.cos(right) * innerRadius, cy + math.sin(right) * innerRadius), color)
             end
-            targetRadialCenteredText(draw, item.label, cx + math.cos(angle) * labelRadius,
+            targetRadialCenteredText(draw, helperCommandSignature(item.label), cx + math.cos(angle) * labelRadius,
                 cy + math.sin(angle) * labelRadius, white)
         end
         draw:AddCircleFilled(center, innerRadius - 3, background, 64)
@@ -13938,7 +14094,7 @@ function drawQuickMenu(context)
             imgui.Dummy(imgui.ImVec2(0, 2))
             for index, item in ipairs(submenuActions) do
                 local bindingText = item.id and actionHotkeyName(item.id) or 'Не назначено'
-                local visibleLabel = item.label .. (bindingText ~= 'Не назначено' and ('  [' .. bindingText .. ']') or '')
+                local visibleLabel = helperCommandSignature(item.label) .. (bindingText ~= 'Не назначено' and ('  [' .. bindingText .. ']') or '')
                 imgui.Button(u8(visibleLabel .. '##quickSub' .. quickMenuPage .. index), imgui.ImVec2(250, 30))
                 if clickPending and imgui.IsItemHovered() then
                     quickMenuAttackBlockUntil = os.clock() + 0.5
@@ -14197,6 +14353,111 @@ function onScriptTerminate(script, quitGame)
     end
 end
 
+-- Единый реестр встроенных команд: обработчики не дублируются в регистрации.
+function buildBuiltInCommandRegistry()
+    return {
+        -- Основное и профиль
+        ph = function() toggleWindow() end,
+        phsync = function() requestStatsNow() end,
+        nanim = commandAnimations,
+        bc = commandBodycam,
+        sp = commandServerPass,
+        -- Сокращённые команды
+        cf = commandCuff,
+        uncf = commandUncf,
+        hd = commandHold,
+        pl = commandPutpl,
+        se = commandSearch,
+        wd = commandWanted,
+        sm = commandSetmark,
+        -- Общение и задержание
+        udo = commandUdo,
+        prava = commandRights,
+        pp = commandPhoneAccept,
+        hh = commandPhoneDecline,
+        ln = commandLeaderOoc,
+        krik = commandShout,
+        cuff = commandCuff,
+        uncuff = commandUncuff,
+        hold = commandHold,
+        search = commandSearch,
+        putpl = commandPutpl,
+        pull = commandPull,
+        arrest = commandArrest,
+        y = commandDetentionMode,
+        untie = commandUntie,
+        -- Розыск, штрафы и базы
+        su = commandSu,
+        sus = commandSmartWanted,
+        pg = commandQuickDisobedience,
+        vn = commandQuickArmedAttack,
+        clear = commandClear,
+        ticket = commandTicket,
+        tick = commandSmartTicket,
+        vstr = commandQuickOncomingTicket,
+        wanted = commandWanted,
+        setmark = commandSetmark,
+        his = commandHistory,
+        wantedcar = commandWantedCar,
+        gpson = commandGpsTracker,
+        gpsoff = commandGpsTrackerClear,
+        sos = commandSos,
+        sosoff = commandSosCancel,
+        -- Мегафон
+        m55 = commandM55,
+        m66 = commandM66,
+        dor = commandMegaphoneYieldRoad,
+        dk = commandMegaphoneRoadCode,
+        proc = commandMegaphoneProcedure,
+        pr = commandStopChase,
+        -- Рация и патруль
+        r4 = function() radio('Состав: {crew}. C\'4, доступен.') end,
+        r20 = function() radio('10-20: {place}. C\'4, доступен.') end,
+        r3 = function() radio('C\'3, требуется срочная поддержка. 10-20: {place}.') end,
+        rstart = commandPatrolStart,
+        rpat = commandPatrolStatus,
+        rend = commandPatrolEnd,
+        -- Команды МВД
+        takelic = commandTakeLicense,
+        takefish = commandTakeFish,
+        skip = commandPass,
+        ['break'] = commandBarrier,
+        d = commandDepartmentDoors,
+        form = commandForm,
+        jailcam = commandJailCamera,
+        jaildoor = commandJailDoor,
+        open = commandBarrierGate,
+        signal = commandSignal,
+        tow = commandTow,
+        fbi = commandFbiDoor,
+        follow = commandFollow,
+        hack = commandHack,
+        names = commandNames,
+        eject = commandEject,
+        -- Кадровая работа
+        invite = commandInvite,
+        uninvite = commandUninvite,
+        uninviteoff = commandUninviteOffline,
+        rang = commandRang,
+        offrang = commandOfflineRang,
+        cs = commandChangeSkin,
+        changeskin = commandChangeSkinLeader,
+        drive = commandDrive,
+        -- ФБР и улики
+        fo = commandFollowOn,
+        foff = commandFollowOff,
+        nar = commandTakeDrugs,
+        pt = commandTakeAmmo,
+        bomb = commandDefuseBomb,
+        -- Снаряжение
+        mask = commandMask,
+        unmask = commandUnmask,
+        healme = commandHealme,
+        -- Прочие команды
+        hr = commandInterview,
+    }
+end
+
 function main()
     if not isSampfuncsLoaded() or not isSampLoaded() then return end
     while not isSampAvailable() do wait(100) end
@@ -14211,143 +14472,10 @@ function main()
     end
     saveConfig()
 
-    registerSafeCommand('ph', toggleWindow)
-    registerSafeCommand('phsync', requestStatsNow)
-    registerSafeCommand('sp', commandServerPass)
-    registerSafeCommand('hr', commandInterview)
-    registerSafeCommand('nanim', commandAnimations)
-    registerSafeCommand('udo', commandUdo)
-    registerSafeCommand('prava', commandRights)
-    registerSafeCommand('cuff', commandCuff)
-    registerSafeCommand('cf', commandCuff)
-    registerSafeCommand('uncuff', commandUncuff)
-    registerSafeCommand('uncf', commandUncf)
-    registerSafeCommand('hold', commandHold)
-    registerSafeCommand('hd', commandHold)
-    registerSafeCommand('search', commandSearch)
-    registerSafeCommand('se', commandSearch)
-    registerSafeCommand('putpl', commandPutpl)
-    registerSafeCommand('pl', commandPutpl)
-    registerSafeCommand('pull', commandPull)
-    registerSafeCommand('arrest', commandArrest)
-    registerSafeCommand('clear', commandClear)
-    registerSafeCommand('su', commandSu)
-    registerSafeCommand('pg', commandQuickDisobedience)
-    registerSafeCommand('vn', commandQuickArmedAttack)
-    registerSafeCommand('sus', commandSmartWanted)
-    registerSafeCommand('ticket', commandTicket)
-    registerSafeCommand('tick', commandSmartTicket)
-    registerSafeCommand('vstr', commandQuickOncomingTicket)
-    registerSafeCommand('m55', commandM55)
-    registerSafeCommand('m66', commandM66)
-    registerSafeCommand('pr', commandStopChase)
-    registerSafeCommand('dk', commandMegaphoneRoadCode)
-    registerSafeCommand('proc', commandMegaphoneProcedure)
-    registerSafeCommand('dor', commandMegaphoneYieldRoad)
-    registerSafeCommand('sm', commandSetmark)
-    registerSafeCommand('setmark', commandSetmark)
-    registerSafeCommand('eject', commandEject)
-    registerSafeCommand('wanted', commandWanted)
-    registerSafeCommand('wd', commandWanted)
-    registerSafeCommand('his', commandHistory)
-    registerSafeCommand('y', commandDetentionMode)
-    registerSafeCommand('krik', commandShout)
-    registerSafeCommand('takelic', commandTakeLicense)
-    registerSafeCommand('takefish', commandTakeFish)
-    registerSafeCommand('skip', commandPass)
-    registerSafeCommand('break', commandBarrier)
-    registerSafeCommand('d', commandDepartmentDoors)
-    registerSafeCommand('invite', commandInvite)
-    registerSafeCommand('uninvite', commandUninvite)
-    registerSafeCommand('uninviteoff', commandUninviteOffline)
-    registerSafeCommand('rang', commandRang)
-    registerSafeCommand('offrang', commandOfflineRang)
-    registerSafeCommand('cs', commandChangeSkin)
-    registerSafeCommand('changeskin', commandChangeSkinLeader)
-    registerSafeCommand('nar', commandTakeDrugs)
-    registerSafeCommand('pt', commandTakeAmmo)
-    registerSafeCommand('bomb', commandDefuseBomb)
-    registerSafeCommand('fo', commandFollowOn)
-    registerSafeCommand('foff', commandFollowOff)
-    registerSafeCommand('pp', commandPhoneAccept)
-    registerSafeCommand('hh', commandPhoneDecline)
-    registerSafeCommand('ln', commandLeaderOoc)
-    registerSafeCommand('form', commandForm)
-    registerSafeCommand('jailcam', commandJailCamera)
-    registerSafeCommand('jaildoor', commandJailDoor)
-    registerSafeCommand('open', commandBarrierGate)
-    registerSafeCommand('signal', commandSignal)
-    registerSafeCommand('tow', commandTow)
-    registerSafeCommand('wantedcar', commandWantedCar)
-    registerSafeCommand('fbi', commandFbiDoor)
-    registerSafeCommand('follow', commandFollow)
-    registerSafeCommand('hack', commandHack)
-    registerSafeCommand('names', commandNames)
-    registerSafeCommand('untie', commandUntie)
-    registerSafeCommand('bc', commandBodycam)
-    registerSafeCommand('mask', commandMask)
-    registerSafeCommand('unmask', commandUnmask)
-    registerSafeCommand('healme', commandHealme)
-    registerSafeCommand('gpson', commandGpsTracker)
-    registerSafeCommand('gpsoff', commandGpsTrackerClear)
-    registerSafeCommand('sos', commandSos)
-    registerSafeCommand('sosoff', commandSosCancel)
-    registerSafeCommand('r4', function()
-        radio('Состав: {crew}. C\'4, доступен.')
-    end)
-    registerSafeCommand('r20', function()
-        radio('10-20: {place}. C\'4, доступен.')
-    end)
-    registerSafeCommand('r3', function()
-        radio('C\'3, требуется срочная поддержка. 10-20: {place}.')
-    end)
-    registerSafeCommand('rstart', commandPatrolStart)
-    registerSafeCommand('rpat', commandPatrolStatus)
-    registerSafeCommand('rend', commandPatrolEnd)
-    registerSafeCommand('drive', commandDrive)
-
-    editorBuiltInHandlers = {
-        ph = function() toggleWindow() end, phsync = function() requestStatsNow() end,
-        sp = commandServerPass,
-        hr = commandInterview,
-        nanim = commandAnimations, udo = commandUdo, prava = commandRights,
-        cuff = commandCuff, cf = commandCuff, uncuff = commandUncuff, uncf = commandUncf,
-        hold = commandHold, hd = commandHold,
-        search = commandSearch, se = commandSearch,
-        putpl = commandPutpl, pl = commandPutpl, pull = commandPull,
-        arrest = commandArrest, clear = commandClear, su = commandSu,
-        pg = commandQuickDisobedience, vn = commandQuickArmedAttack,
-        sus = commandSmartWanted, ticket = commandTicket, tick = commandSmartTicket,
-        vstr = commandQuickOncomingTicket,
-        m55 = commandM55, m66 = commandM66, pr = commandStopChase,
-        dk = commandMegaphoneRoadCode, proc = commandMegaphoneProcedure,
-        dor = commandMegaphoneYieldRoad, sm = commandSetmark, setmark = commandSetmark,
-        eject = commandEject, wanted = commandWanted, wd = commandWanted, his = commandHistory,
-        y = commandDetentionMode, krik = commandShout, takelic = commandTakeLicense,
-        takefish = commandTakeFish, skip = commandPass, ['break'] = commandBarrier,
-        d = commandDepartmentDoors, invite = commandInvite, uninvite = commandUninvite,
-        uninviteoff = commandUninviteOffline, rang = commandRang, offrang = commandOfflineRang,
-        cs = commandChangeSkin, changeskin = commandChangeSkinLeader,
-        nar = commandTakeDrugs, pt = commandTakeAmmo,
-        bomb = commandDefuseBomb,
-        fo = commandFollowOn, foff = commandFollowOff, pp = commandPhoneAccept,
-        hh = commandPhoneDecline, ln = commandLeaderOoc,
-        form = commandForm, jailcam = commandJailCamera,
-        jaildoor = commandJailDoor, open = commandBarrierGate, signal = commandSignal,
-        tow = commandTow, wantedcar = commandWantedCar, fbi = commandFbiDoor,
-        follow = commandFollow, hack = commandHack, names = commandNames,
-        untie = commandUntie, bc = commandBodycam, mask = commandMask,
-        unmask = commandUnmask, healme = commandHealme, gpson = commandGpsTracker,
-        gpsoff = commandGpsTrackerClear, sos = commandSos, sosoff = commandSosCancel,
-        r4 = function() radio('Состав: {crew}. C\'4, доступен.') end,
-        r20 = function() radio('10-20: {place}. C\'4, доступен.') end,
-        r3 = function() radio('C\'3, требуется срочная поддержка. 10-20: {place}.') end,
-        rstart = commandPatrolStart, rpat = commandPatrolStatus, rend = commandPatrolEnd,
-        drive = commandDrive
-    }
-    for commandName in pairs(editorBuiltInHandlers) do editorReservedCommands[commandName] = true end
+    editorBuiltInHandlers = buildBuiltInCommandRegistry()
+    registerBuiltInCommands()
     registerAllEditorCommands()
-    notify('Загружен. Главное меню: /ph или ' .. mainHotkeyName() .. '. Быстрый доступ: удерживать ' .. quickHotkeyName() .. '.')
+    notify('Загружен. Главное меню: /' .. getBuiltInCommandName('ph') .. ' или ' .. mainHotkeyName() .. '. Быстрый доступ: удерживать ' .. quickHotkeyName() .. '.')
     notify('Меню игрока: ' .. targetRadialHotkeyName() .. '. Наведитесь ПКМ на игрока, затем нажмите ' .. quickHotkeyName() .. '.')
     if UPDATE_MANIFEST_URL ~= '' then
         lua_thread.create(function()
